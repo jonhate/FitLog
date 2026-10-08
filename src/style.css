@@ -1,0 +1,234 @@
+@import "tailwindcss";
+:root {
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: #eef1f6;
+  background: #101217;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  border: 0;
+  border-radius: 12px;
+  background: #303640;
+  color: #eef1f6;
+  min-height: 48px;
+  padding: 10px 15px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.4;
+}
+input,
+select,
+textarea {
+  background: #11151c;
+  border: 1px solid #384252;
+  border-radius: 10px;
+  color: #eef1f6;
+  min-height: 48px;
+  padding: 10px;
+  width: 100%;
+}
+input[type="checkbox"] {
+  width: 24px;
+}
+input.invalid {
+  border-color: #ff7777;
+}
+textarea {
+  min-height: 90px;
+}
+h1 {
+  font-size: 27px;
+  font-weight: 700;
+  margin: 24px 0 12px;
+}
+h2 {
+  font-size: 18px;
+  font-weight: 650;
+  margin: 8px 0;
+}
+p {
+  color: #aab4c5;
+  font-size: 14px;
+  line-height: 1.6;
+}
+small {
+  display: block;
+  color: #8e9caf;
+}
+.app {
+  max-width: 640px;
+  margin: auto;
+  padding: 24px 16px 110px;
+  padding-top: max(24px, env(safe-area-inset-top));
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+header strong {
+  font-size: 30px;
+  letter-spacing: -1px;
+}
+header strong span {
+  font-size: 12px;
+  color: #a1edb8;
+  margin-left: 9px;
+}
+header small {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.badge {
+  background: #25382d;
+  color: #b8f2cb;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 30px;
+}
+section {
+  background: #1c2028;
+  border: 1px solid #2b313c;
+  padding: 16px;
+  border-radius: 18px;
+  margin: 16px 0;
+}
+section > button {
+  margin: 8px 8px 0 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+.row input {
+  max-width: 115px;
+}
+.row h2 {
+  flex: 1;
+}
+.preview {
+  border-bottom: 1px solid #303540;
+  padding: 10px 0;
+  font-size: 14px;
+}
+.primary,
+.done {
+  background: #b4f0bc;
+  color: #112417;
+  font-weight: 700;
+}
+.primary {
+  width: 100%;
+  margin-top: 16px;
+}
+.subtle {
+  background: transparent;
+  color: #aebacb;
+  padding: 8px;
+}
+.danger {
+  color: #ff9a9a;
+}
+.setgrid {
+  display: grid;
+  grid-template-columns:
+    20px minmax(60px, 1fr) minmax(60px, 1fr) minmax(45px, 0.7fr)
+    48px 28px;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0;
+}
+.setgrid input {
+  text-align: center;
+  padding: 8px 2px;
+  font-variant-numeric: tabular-nums;
+}
+.setgrid button {
+  padding: 0;
+}
+.labels {
+  font-size: 11px;
+  color: #98a3b5;
+  text-align: center;
+}
+.progress {
+  padding: 16px;
+  background: #1c2821;
+  border-radius: 14px;
+}
+progress {
+  width: 100%;
+  height: 7px;
+  accent-color: #b4f0bc;
+}
+.error {
+  padding: 14px;
+  border: 1px solid #804848;
+  background: #3a2529;
+  border-radius: 12px;
+  margin: 14px 0;
+  color: #ffd0d0;
+}
+.error button {
+  margin: 8px;
+}
+.skipped {
+  opacity: 0.55;
+}
+nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background: #1c2028ef;
+  width: 100%;
+  max-width: 640px;
+  padding: 10px 12px max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid #343b48;
+}
+nav button {
+  flex: 1;
+  background: transparent;
+  color: #95a0b3;
+  padding: 10px 3px;
+}
+nav .selected {
+  background: #2f4436;
+  color: #c8f3ce;
+}
+label {
+  display: block;
+  margin: 14px 0;
+}
+label select {
+  margin-top: 8px;
+}
+
+/* Keep all three numeric fields and completion visible on narrow phones. */
+.setgrid { grid-template-columns: 22px minmax(0,1.2fr) minmax(0,1fr) minmax(0,.8fr) 44px 24px; gap: 5px; }
+.setgrid input { min-width: 0; width: 100%; font-size: 16px; }
+.setgrid b { color: #b4f0bc; text-align: center; }
+.completed-row input { border-color: #497858; background: #16251c; }
+.labels { margin-top: 16px; font-size: 12px; }
+@media (max-width: 380px) { .app { padding-left: 10px; padding-right: 10px; } section { padding: 12px; } }

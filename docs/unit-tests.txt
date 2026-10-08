@@ -1,0 +1,14 @@
+
+> fitlog@1.0.0 test
+> vitest run
+
+
+ RUN  v3.2.7 /workspace/scratch/8921d5e15ad6/fitlog
+
+ ✓ tests/fitlog.test.ts (21 tests) 283ms
+
+ Test Files  1 passed (1)
+      Tests  21 passed (21)
+   Start at  22:10:34
+   Duration  1.35s (transform 502ms, setup 0ms, collect 585ms, tests 283ms, environment 0ms, prepare 190ms)
+

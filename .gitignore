@@ -1,0 +1,11 @@
+node_modules/
+dist/
+android/.gradle/
+android/**/build/
+android/local.properties
+playwright-report/
+test-results/
+
+# Signing keys are retained privately, never published.
+android/app/fitlog-debug.keystore
+*.jks

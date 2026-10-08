@@ -1,0 +1,24 @@
+{
+  "format": "fitlog-plans",
+  "version": 1,
+  "days": [
+    {
+      "weekday": 1,
+      "name": "胸 + 肩 + 三头",
+      "rest": false,
+      "exercises": [
+        {
+          "name": "平板卧推",
+          "weights": [
+            null,
+            null,
+            null,
+            null
+          ],
+          "reps_min": 8,
+          "reps_max": 12
+        }
+      ]
+    }
+  ]
+}
