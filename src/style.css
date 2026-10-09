@@ -226,9 +226,174 @@ label select {
 }
 
 /* Keep all three numeric fields and completion visible on narrow phones. */
-.setgrid { grid-template-columns: 22px minmax(0,1.2fr) minmax(0,1fr) minmax(0,.8fr) 44px 24px; gap: 5px; }
-.setgrid input { min-width: 0; width: 100%; font-size: 16px; }
-.setgrid b { color: #b4f0bc; text-align: center; }
-.completed-row input { border-color: #497858; background: #16251c; }
-.labels { margin-top: 16px; font-size: 12px; }
-@media (max-width: 380px) { .app { padding-left: 10px; padding-right: 10px; } section { padding: 12px; } }
+.setgrid {
+  grid-template-columns: 22px minmax(0, 1.2fr) minmax(0, 1fr) minmax(
+      0,
+      0.8fr
+    ) 44px 24px;
+  gap: 5px;
+}
+.setgrid input {
+  min-width: 0;
+  width: 100%;
+  font-size: 16px;
+}
+.setgrid b {
+  color: #b4f0bc;
+  text-align: center;
+}
+.completed-row input {
+  border-color: #497858;
+  background: #16251c;
+}
+.labels {
+  margin-top: 16px;
+  font-size: 12px;
+}
+@media (max-width: 380px) {
+  .app {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  section {
+    padding: 12px;
+  }
+}
+
+.rep-bound {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  color: #aab4c5;
+}
+.rep-bound input {
+  margin-top: 5px;
+  max-width: none;
+}
+.calendar {
+  touch-action: pan-y;
+}
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.calendar-grid button {
+  min-width: 0;
+  padding: 6px 0;
+  position: relative;
+  background: transparent;
+}
+.calendar-grid .calendar-selected {
+  background: #b4f0bc;
+  color: #112417;
+}
+.calendar-dot {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #b4f0bc;
+  margin: 2px auto 0;
+}
+.calendar-selected .calendar-dot {
+  background: #112417;
+}
+.calendar-year {
+  margin: 0;
+  font-size: 11px;
+  max-width: 120px;
+}
+.calendar-year select {
+  margin-top: 2px;
+}
+.side-group {
+  border: 1px solid #384252;
+  border-radius: 12px;
+  margin: 12px 0;
+  padding: 8px;
+}
+.side-group > .row {
+  margin-top: 0;
+  font-size: 13px;
+}
+.side-group small {
+  font-size: 11px;
+}
+.exercise-notes {
+  margin-top: 14px;
+  border-top: 1px solid #343b48;
+  padding-top: 4px;
+}
+.exercise-notes label {
+  font-size: 13px;
+  color: #acb9cc;
+}
+.exercise-notes textarea {
+  margin-top: 6px;
+  min-height: 65px;
+  resize: vertical;
+}
+.target-editor {
+  margin: 10px 0;
+  background: #161b23;
+  border-radius: 12px;
+  padding: 8px;
+}
+.target-editor .row label {
+  flex: 1;
+  margin: 4px 0;
+  font-size: 12px;
+}
+.target-editor input {
+  max-width: none;
+  margin-top: 5px;
+}
+.target-editor .row button {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 13px;
+}
+.target-editor button.selected {
+  background: #2f4436;
+  color: #c8f3ce;
+}
+.rest-switch {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: #1c2028;
+  border-radius: 12px;
+}
+.rest-switch input {
+  appearance: none;
+  width: 48px;
+  min-height: 28px;
+  height: 28px;
+  border-radius: 20px;
+  padding: 0;
+  background: #495262;
+  position: relative;
+  flex-shrink: 0;
+}
+.rest-switch input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+}
+.rest-switch input:checked {
+  background: #548662;
+}
+.rest-switch input:checked::after {
+  left: 23px;
+}
+.rest-switch small {
+  font-size: 11px;
+  margin-top: 3px;
+}

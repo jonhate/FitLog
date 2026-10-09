@@ -19,6 +19,34 @@
           "reps_max": 12
         }
       ]
+    },
+    {
+      "weekday": 2,
+      "name": "单侧示例（按需修改）",
+      "rest": false,
+      "exercises": [
+        {
+          "name": "单臂哑铃划船",
+          "mode": "unilateral",
+          "weights": [
+            null,
+            null,
+            null
+          ],
+          "weights_left": [
+            null,
+            null,
+            null
+          ],
+          "weights_right": [
+            null,
+            null,
+            null
+          ],
+          "reps_min": null,
+          "reps_max": null
+        }
+      ]
     }
   ]
 }

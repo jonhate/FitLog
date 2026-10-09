@@ -1,5 +1,5 @@
 import { DB, transaction } from "./db";
-import { tables } from "./schema";
+import { tables, version } from "./schema";
 export const uuid = () => {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 15) | 64;
@@ -28,21 +28,21 @@ export class Repository {
     return transaction(this.db, fn);
   }
   async dump() {
-    const result: any = { schema_version: 2, exported_at: now() };
+    const result: any = { schema_version: version, exported_at: now() };
     for (const t of tables) result[t] = await this.all(`SELECT * FROM ${t}`);
     return result;
   }
   async sets(id: string) {
     return this.all(
-      "SELECT * FROM session_sets WHERE session_exercise_id=? ORDER BY set_index",
+      "SELECT * FROM session_sets WHERE session_exercise_id=? ORDER BY set_index,side",
       [id],
     );
   }
-  async history(exercise: string, index: number) {
+  async history(exercise: string, index: number, side = "both") {
     return (
       await this.all(
-        `SELECT ss.weight,ss.reps FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id WHERE se.exercise_id=? AND ss.set_index=? AND ss.completed=1 AND se.skipped=0 AND s.status='completed' AND ss.weight IS NOT NULL AND ss.reps>0 ORDER BY s.completed_at DESC,s.started_at DESC LIMIT 1`,
-        [exercise, index],
+        `SELECT ss.weight,ss.reps FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id WHERE se.exercise_id=? AND ss.set_index=? AND ss.side=? AND ss.completed=1 AND se.skipped=0 AND s.status='completed' AND ss.weight IS NOT NULL AND ss.reps>0 AND NOT EXISTS (SELECT 1 FROM session_sets peer WHERE peer.session_exercise_id=ss.session_exercise_id AND peer.set_index=ss.set_index AND (peer.completed=0 OR peer.weight IS NULL OR peer.reps IS NULL OR peer.reps<=0)) ORDER BY s.completed_at DESC,s.started_at DESC LIMIT 1`,
+        [exercise, index, side],
       )
     )[0];
   }

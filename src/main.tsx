@@ -5,9 +5,10 @@ import { createRoot } from "react-dom/client";
 import { openDB } from "./db";
 import { Repository } from "./repository";
 import { FitLog } from "./service";
-import { numberInput } from "./domain";
+import { numberInput, groups, targetLabel } from "./domain";
 import { saveFile, openFile } from "./files";
 import "./style.css";
+import { HistoryCalendar, localDateKey } from "./HistoryCalendar";
 let service: FitLog;
 const day = () => new Date().getDay() || 7;
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
@@ -59,7 +60,127 @@ function Numeric({
     />
   );
 }
+function NoteField({
+  value,
+  label,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  label: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const focused = useRef(false),
+    [text, setText] = useState(value || "");
+  useEffect(() => {
+    if (!focused.current) setText(value || "");
+  }, [value]);
+  return (
+    <textarea
+      aria-label={label}
+      rows={2}
+      placeholder={placeholder}
+      value={text}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={() => {
+        focused.current = false;
+      }}
+      onChange={(event) => {
+        setText(event.target.value);
+        onChange(event.target.value);
+      }}
+    />
+  );
+}
+function RepTarget({
+  exercise: e,
+  change,
+}: {
+  exercise: any;
+  change: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [range, setRange] = useState(e.target_reps_min !== e.target_reps_max);
+  return (
+    <div className="target-editor">
+      <button className="subtle" onClick={() => setOpen(!open)}>
+        {targetLabel(e.target_reps_min, e.target_reps_max) ||
+          "目标次数：未设置"}{" "}
+        · {open ? "收起" : "设置（可选）"}
+      </button>
+      {open && (
+        <>
+          <div className="row">
+            <button
+              className={!range ? "selected" : ""}
+              onClick={() => {
+                setRange(false);
+                e.target_reps_max = e.target_reps_min;
+                change();
+              }}
+            >
+              固定次数
+            </button>
+            <button
+              className={range ? "selected" : ""}
+              onClick={() => setRange(true)}
+            >
+              次数范围
+            </button>
+            <button
+              onClick={() => {
+                e.target_reps_min = null;
+                e.target_reps_max = null;
+                change();
+                setOpen(false);
+              }}
+            >
+              清除
+            </button>
+          </div>
+          <div className="row">
+            <label>
+              {range ? "最少次数" : "每组目标次数"}
+              <Numeric
+                integer
+                value={e.target_reps_min}
+                placeholder={range ? "最少次数" : "目标次数"}
+                onChange={(n) => {
+                  e.target_reps_min = n;
+                  if (!range) e.target_reps_max = n;
+                  change();
+                }}
+              />
+            </label>
+            {range && (
+              <label>
+                最多次数
+                <Numeric
+                  integer
+                  value={e.target_reps_max}
+                  placeholder="最多次数"
+                  onChange={(n) => {
+                    e.target_reps_max = n;
+                    change();
+                  }}
+                />
+              </label>
+            )}
+          </div>
+          <small>仅作为训练参考；实际次数仍需逐组填写。</small>
+        </>
+      )}
+    </div>
+  );
+}
 function App() {
+  const [adding, setAdding] = useState(false),
+    [temporaryName, setTemporaryName] = useState(""),
+    [temporaryMode, setTemporaryMode] = useState("bilateral");
+  const [historyDate, setHistoryDate] = useState<string | null>(null);
   const [ready, setReady] = useState(false),
     [error, setError] = useState(""),
     [tab, setTab] = useState("今日"),
@@ -95,7 +216,7 @@ function App() {
       sessions: (await service.r.all("SELECT COUNT(*) n FROM sessions"))[0].n,
       sets: (
         await service.r.all(
-          "SELECT COUNT(*) n FROM session_sets WHERE completed=1",
+          "SELECT COUNT(*) n FROM (SELECT session_exercise_id,set_index FROM session_sets GROUP BY session_exercise_id,set_index HAVING MIN(completed)=1)",
         )
       )[0].n,
     });
@@ -123,6 +244,7 @@ function App() {
     }
   };
   const loadSession = async (id: string, h = false) => {
+    await service.flush();
     setSession(await service.session(id));
     setHistorical(h);
     setDirty(false);
@@ -182,12 +304,36 @@ function App() {
     try {
       setMessage("保存中…");
       await service.editSet(e.id, s.id, patch);
+      await service.flush();
       const data = await service.session(session.id);
       setSession(data);
       setMessage("已保存");
     } catch (err: any) {
       setError("保存失败：" + err.message);
       throw err;
+    }
+  };
+  const editNotes = async (e: any, value: string, reminder = false) => {
+    const key = reminder ? "next_reminder_snapshot" : "notes";
+    setSession((current: any) => ({
+      ...current,
+      exercises: current.exercises.map((x: any) =>
+        x.id === e.id ? { ...x, [key]: value } : x,
+      ),
+    }));
+    if (historical) {
+      setDirty(true);
+      return;
+    }
+    try {
+      setMessage("保存中…");
+      await service.editExerciseNotes(
+        e.id,
+        reminder ? { next_reminder: value } : { notes: value },
+      );
+      setMessage("已保存");
+    } catch (err: any) {
+      setError("保存失败：" + err.message);
     }
   };
   const mutateSession = async (fn: () => Promise<any>) =>
@@ -198,6 +344,7 @@ function App() {
     });
   const navigate = (next: string) => {
     if (dirty && !confirm("放弃尚未保存的修改？")) return;
+    setAdding(false);
     setTab(next);
     setSession(null);
     setPlan(null);
@@ -214,7 +361,7 @@ function App() {
       <header>
         <div>
           <strong>
-            FitLog<span>V1</span>
+            FitLog<span>V1.3</span>
           </strong>
           <small>本地 · 离线 · 属于你</small>
         </div>
@@ -292,6 +439,11 @@ function App() {
                   </button>
                 )}
               </div>
+              <small>
+                {e.mode === "unilateral" ? "单手 · 每组分左右记录" : "双手"}
+                {targetLabel(e.target_reps_min, e.target_reps_max) &&
+                  ` · ${targetLabel(e.target_reps_min, e.target_reps_max)}`}
+              </small>
               <div className="setgrid labels">
                 <span>组</span>
                 <span>重量 kg</span>
@@ -300,54 +452,103 @@ function App() {
                 <span>完成</span>
                 <span />
               </div>
-              {e.sets.map((s: any) => (
-                <div className={`setgrid ${s.completed ? "completed-row" : ""}`} key={s.id}>
-                  <b>{s.set_index}</b>
-                  <Numeric
-                    value={s.weight}
-                    placeholder="重量"
-                    onChange={(n) => edit(e, s, { weight: n })}
-                  />
-                  <Numeric
-                    value={s.reps}
-                    integer
-                    placeholder={
-                      s.reference_reps ? `上次${s.reference_reps}` : "次数"
-                    }
-                    onChange={(n) => edit(e, s, { reps: n })}
-                  />
-                  <Numeric
-                    value={s.rir}
-                    integer
-                    placeholder="RIR"
-                    onChange={(n) => edit(e, s, { rir: n })}
-                  />
-                  <button
-                    disabled={!!e.skipped}
-                    className={s.completed ? "done" : ""}
-                    aria-label="完成组"
-                    onClick={() =>
-                      action(() =>
-                        edit(e, s, { completed: s.completed ? 0 : 1 }),
-                      )
-                    }
-                  >
-                    {s.completed ? "✓" : "○"}
-                  </button>
-                  {!historical && (
-                    <button
-                      className="subtle"
-                      aria-label="删除组"
-                      onClick={() => {
-                        if (confirm("删除这一组及其输入？"))
-                          mutateSession(() => service.deleteSet(e.id, s.id));
-                      }}
-                    >
-                      ×
-                    </button>
+              {groups(e.sets).map((group) => (
+                <div
+                  className={e.mode === "unilateral" ? "side-group" : ""}
+                  key={group[0].id}
+                >
+                  {e.mode === "unilateral" && (
+                    <div className="row">
+                      <b>第 {group[0].set_index} 组</b>
+                      <small>左右完成算一组</small>
+                    </div>
                   )}
+                  {group.map((s: any, sideIndex: number) => (
+                    <div
+                      className={`setgrid ${s.completed ? "completed-row" : ""}`}
+                      key={s.id}
+                    >
+                      <b>
+                        {s.side === "left"
+                          ? "左"
+                          : s.side === "right"
+                            ? "右"
+                            : s.set_index}
+                      </b>
+                      <Numeric
+                        value={s.weight}
+                        placeholder="重量"
+                        onChange={(n) => edit(e, s, { weight: n })}
+                      />
+                      <Numeric
+                        value={s.reps}
+                        integer
+                        placeholder={
+                          s.reference_reps ? `上次${s.reference_reps}` : "次数"
+                        }
+                        onChange={(n) => edit(e, s, { reps: n })}
+                      />
+                      <Numeric
+                        value={s.rir}
+                        integer
+                        placeholder="RIR"
+                        onChange={(n) => edit(e, s, { rir: n })}
+                      />
+                      <button
+                        disabled={!!e.skipped}
+                        className={s.completed ? "done" : ""}
+                        aria-label="完成组"
+                        onClick={() =>
+                          action(() =>
+                            edit(e, s, { completed: s.completed ? 0 : 1 }),
+                          )
+                        }
+                      >
+                        {s.completed ? "✓" : "○"}
+                      </button>
+                      {!historical && sideIndex === 0 && (
+                        <button
+                          className="subtle"
+                          aria-label="删除组"
+                          onClick={() => {
+                            if (confirm("删除这一组及其输入？"))
+                              mutateSession(() =>
+                                service.deleteSet(e.id, s.id),
+                              );
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
+              <div className="exercise-notes">
+                <label>
+                  本次感受
+                  <NoteField
+                    label="本次感受"
+                    placeholder="动作感受、发力或不适（可选）"
+                    value={e.notes || ""}
+                    onChange={(value) => void editNotes(e, value)}
+                  />
+                </label>
+                <label>
+                  下次提醒
+                  {historical ? (
+                    <p>{e.next_reminder_snapshot || "未设置"}</p>
+                  ) : (
+                    <NoteField
+                      label="下次提醒"
+                      placeholder="例如：下次尝试 15 kg，注意控制离心"
+                      value={e.next_reminder_snapshot || ""}
+                      onChange={(value) => void editNotes(e, value, true)}
+                    />
+                  )}
+                </label>
+                <small>提醒会带入下次训练，不会自动改写重量。</small>
+              </div>
               {!historical && !e.skipped && (
                 <button
                   className="subtle"
@@ -399,17 +600,49 @@ function App() {
             </section>
           ) : (
             <>
-              <button
-                onClick={() => {
-                  const name = prompt("临时动作名称");
-                  if (name)
-                    mutateSession(() =>
-                      service.addSessionExercise(session.id, name),
-                    );
-                }}
-              >
-                ＋ 临时动作
-              </button>
+              {adding ? (
+                <section>
+                  <h2>临时动作</h2>
+                  <label>
+                    动作名称
+                    <input
+                      aria-label="临时动作名称"
+                      value={temporaryName}
+                      onChange={(event) => setTemporaryName(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    记录方式
+                    <select
+                      aria-label="临时动作记录方式"
+                      value={temporaryMode}
+                      onChange={(event) => setTemporaryMode(event.target.value)}
+                    >
+                      <option value="bilateral">双手 / 双侧同时</option>
+                      <option value="unilateral">单手 / 单侧分开</option>
+                    </select>
+                  </label>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      mutateSession(async () => {
+                        await service.addSessionExercise(
+                          session.id,
+                          temporaryName,
+                          temporaryMode,
+                        );
+                        setAdding(false);
+                        setTemporaryName("");
+                      })
+                    }
+                  >
+                    添加到本次训练
+                  </button>
+                  <button onClick={() => setAdding(false)}>取消</button>
+                </section>
+              ) : (
+                <button onClick={() => setAdding(true)}>＋ 临时动作</button>
+              )}
               <button
                 className="primary"
                 disabled={busy}
@@ -447,8 +680,10 @@ function App() {
               setDirty(true);
             }}
           />
-          <label className="row">
+          <label className="row rest-switch">
             <input
+              role="switch"
+              aria-label="设为休息日"
               type="checkbox"
               checked={!!plan.rest}
               onChange={(e) => {
@@ -456,7 +691,9 @@ function App() {
                 setDirty(true);
               }}
             />
-            休息日
+            <span>
+              设为休息日<small>开启后，今日页面显示休息状态</small>
+            </span>
           </label>
           {plan.exercises.map((e: any, index: number) => (
             <section key={e.id}>
@@ -506,41 +743,71 @@ function App() {
                   删除
                 </button>
               </div>
-              <div className="row">
-                <span>目标次数</span>
-                <Numeric
-                  integer
-                  value={e.target_reps_min}
-                  placeholder="最少次数"
-                  onChange={(n) => {
-                    e.target_reps_min = n;
+              <label className="row">
+                记录方式
+                <select
+                  aria-label="记录方式"
+                  value={e.mode || "bilateral"}
+                  onChange={(event) => {
+                    if (
+                      event.target.value === "unilateral" &&
+                      e.mode !== "unilateral"
+                    )
+                      for (const s of e.sets) {
+                        s.default_weight_left = s.default_weight;
+                        s.default_weight_right = s.default_weight;
+                      }
+                    e.mode = event.target.value;
                     setPlan({ ...plan });
                     setDirty(true);
                   }}
-                />
-                <Numeric
-                  integer
-                  value={e.target_reps_max}
-                  placeholder="最多次数"
-                  onChange={(n) => {
-                    e.target_reps_max = n;
-                    setPlan({ ...plan });
-                    setDirty(true);
-                  }}
-                />
-              </div>
+                >
+                  <option value="bilateral">双手 / 双侧同时</option>
+                  <option value="unilateral">单手 / 单侧分开</option>
+                </select>
+              </label>
+              <RepTarget
+                exercise={e}
+                change={() => {
+                  setPlan({ ...plan });
+                  setDirty(true);
+                }}
+              />
               {e.sets.map((s: any, i: number) => (
                 <div className="row" key={i}>
                   <span>第{i + 1}组默认 kg</span>
-                  <Numeric
-                    value={s.default_weight}
-                    placeholder="默认重量"
-                    onChange={(n) => {
-                      s.default_weight = n;
-                      setPlan({ ...plan });
-                      setDirty(true);
-                    }}
-                  />
+                  {(e.mode === "unilateral" ? ["left", "right"] : ["both"]).map(
+                    (side) => (
+                      <label key={side}>
+                        {side === "left"
+                          ? "左侧"
+                          : side === "right"
+                            ? "右侧"
+                            : ""}
+                        <Numeric
+                          value={
+                            side === "both"
+                              ? s.default_weight
+                              : (s[`default_weight_${side}`] ?? null)
+                          }
+                          placeholder={
+                            side === "both"
+                              ? "默认重量"
+                              : `${side === "left" ? "左" : "右"}侧默认重量`
+                          }
+                          onChange={(n) => {
+                            s[
+                              side === "both"
+                                ? "default_weight"
+                                : `default_weight_${side}`
+                            ] = n;
+                            setPlan({ ...plan });
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                    ),
+                  )}
                   <button
                     disabled={e.sets.length === 1}
                     onClick={() => {
@@ -686,63 +953,96 @@ function App() {
             </>
           ) : tab === "周计划" ? (
             <>
-            <p>示例动作可编辑；重量按你的实际情况填写。周三、周日为休息日。</p>
-            <button onClick={() => action(async () => {
-              await service.fillEmptySampleDays();
-              await refresh();
-              setMessage("已补全空白训练日，已有动作保持原样");
-            })}>补全空白日期的示例动作</button>
-            {plans.map((p) => (
-              <section key={p.id}>
-                <small>
-                  周{weekdays[p.weekday - 1]} {p.rest ? "· 休息" : ""}
-                </small>
-                <h2>{p.name}</h2>
-                <PlanPreview key={`${p.id}-${p.version}`} id={p.id} />
-                <button
-                  onClick={() =>
-                    action(async () => {
-                      setPlan(await service.plan(p.id));
-                      setDirty(false);
-                    })
-                  }
-                >
-                  编辑计划
-                </button>
-              </section>
-            ))}
-            </>
-          ) : tab === "历史" ? (
-            <>
-              {!history.length && <p>还没有训练记录</p>}
-              {history.map((s) => (
-                <section key={s.id}>
+              <p>
+                示例动作可编辑；重量按你的实际情况填写。周三、周日为休息日。
+              </p>
+              <button
+                onClick={() =>
+                  action(async () => {
+                    await service.fillEmptySampleDays();
+                    await refresh();
+                    setMessage("已补全空白训练日，已有动作保持原样");
+                  })
+                }
+              >
+                补全空白日期的示例动作
+              </button>
+              {plans.map((p) => (
+                <section key={p.id}>
                   <small>
-                    {new Date(s.started_at).toLocaleString()} ·{" "}
-                    {s.status === "active" ? "未完成" : "已完成"}
+                    周{weekdays[p.weekday - 1]} {p.rest ? "· 休息" : ""}
                   </small>
-                  <h2>{s.plan_name_snapshot}</h2>
-                  <button onClick={() => action(() => loadSession(s.id, true))}>
-                    查看 / 编辑
+                  <h2>{p.name}</h2>
+                  <PlanPreview key={`${p.id}-${p.version}`} id={p.id} />
+                  <button
+                    onClick={() =>
+                      action(async () => {
+                        setPlan(await service.plan(p.id));
+                        setDirty(false);
+                      })
+                    }
+                  >
+                    编辑计划
                   </button>
                 </section>
               ))}
             </>
+          ) : tab === "历史" ? (
+            <>
+              <HistoryCalendar
+                sessions={history}
+                selected={historyDate}
+                onSelect={setHistoryDate}
+              />
+              {!history.length && <p>还没有训练记录</p>}
+              {historyDate &&
+                !history.some(
+                  (s) => localDateKey(s.started_at) === historyDate,
+                ) && <p>这一天没有训练记录</p>}
+              {history
+                .filter(
+                  (s) =>
+                    !historyDate || localDateKey(s.started_at) === historyDate,
+                )
+                .map((s) => (
+                  <section key={s.id}>
+                    <small>
+                      {new Date(s.started_at).toLocaleString()} ·{" "}
+                      {s.status === "active" ? "未完成" : "已完成"}
+                    </small>
+                    <h2>{s.plan_name_snapshot}</h2>
+                    <button
+                      onClick={() => action(() => loadSession(s.id, true))}
+                    >
+                      查看 / 编辑
+                    </button>
+                  </section>
+                ))}
+            </>
           ) : (
             <section>
               <h2>数据管理</h2>
-              <button onClick={() => action(async () => {
-                const text = await openFile();
-                if (!text) return;
-                if (!confirm("替换文件中指定日期的计划？历史和当前训练保留。")) return;
-                const count = await service.importPlansJSON(text);
-                await refresh();
-                setMessage(`已导入 ${count} 天计划，训练记录保留`);
-              })}>导入训练计划 JSON</button>
+              <button
+                onClick={() =>
+                  action(async () => {
+                    const text = await openFile();
+                    if (!text) return;
+                    if (
+                      !confirm("替换文件中指定日期的计划？历史和当前训练保留。")
+                    )
+                      return;
+                    const count = await service.importPlansJSON(text);
+                    await refresh();
+                    setMessage(`已导入 ${count} 天计划，训练记录保留`);
+                  })
+                }
+              >
+                导入训练计划 JSON
+              </button>
               <p>
                 {stats?.sessions} 次训练 · {stats?.sets} 个完成组
               </p>
-              <p>数据库 v2 · 应用 1.0.0</p>
+              <p>数据库 v3 · 应用 1.0.0（V1.3）</p>
               <p>
                 卸载或清除应用数据会删除数据库。请将JSON备份保存到独立目录。
               </p>
@@ -830,8 +1130,10 @@ function App() {
 function Progress({ session }: { session: any }) {
   const rows = session.exercises
     .filter((e: any) => !e.skipped)
-    .flatMap((e: any) => e.sets);
-  const done = rows.filter((s: any) => s.completed).length;
+    .flatMap((e: any) => groups(e.sets));
+  const done = rows.filter((group: any[]) =>
+    group.every((s) => s.completed),
+  ).length;
   return (
     <div className="progress">
       <div className="row">
@@ -860,7 +1162,13 @@ function PlanPreview({ id }: { id: string }) {
       {p?.exercises.length ? (
         p.exercises.map((e: any) => (
           <div className="row preview" key={e.id}>
-            <span>{e.name}</span>
+            <span>
+              {e.name}
+              <small>
+                {e.mode === "unilateral" ? "单手 · " : ""}
+                {targetLabel(e.target_reps_min, e.target_reps_max)}
+              </small>
+            </span>
             <b>{e.target_sets}组</b>
           </div>
         ))
@@ -882,7 +1190,8 @@ function ActivePreview({ id }: { id: string }) {
         <div className="row preview" key={e.id}>
           <span>{e.exercise_name_snapshot}</span>
           <b>
-            {e.sets.filter((x: any) => x.completed).length} / {e.sets.length}组
+            {groups(e.sets).filter((g) => g.every((x) => x.completed)).length} /{" "}
+            {groups(e.sets).length}组
           </b>
         </div>
       ))}

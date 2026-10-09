@@ -20,16 +20,30 @@ export function initialWeight(
   return { weight: null, weight_source: "empty" };
 }
 export function propagate(rows: SetRow[]) {
-  let previous: number | null = null;
+  const previous: Record<string, number | null> = {};
   return rows.map((r) => {
-    let s = { ...r };
-    if (!s.completed && !["manual", "history"].includes(s.weight_source)) {
-      Object.assign(s, initialWeight(null, previous, s.default_weight));
-    }
-    previous = s.weight;
+    const s = { ...r },
+      side = s.side ?? "both";
+    if (!s.completed && !["manual", "history"].includes(s.weight_source))
+      Object.assign(s, initialWeight(null, previous[side], s.default_weight));
+    previous[side] = s.weight;
     return s;
   });
 }
+export function groups(rows: SetRow[]) {
+  const result = new Map<number, SetRow[]>();
+  for (const row of rows)
+    result.set(row.set_index, [...(result.get(row.set_index) ?? []), row]);
+  return [...result.values()];
+}
+export function targetLabel(min: number | null, max: number | null) {
+  if (min == null && max == null) return "";
+  if (min != null && max === min) return `目标 ${min} 次`;
+  if (min == null) return `目标最多 ${max} 次`;
+  if (max == null) return `目标至少 ${min} 次`;
+  return `目标 ${min}–${max} 次`;
+}
+
 export function valid(s: SetRow) {
   return (
     s.weight != null &&

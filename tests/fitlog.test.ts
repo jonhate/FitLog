@@ -234,9 +234,9 @@ describe("real SQLite integration", () => {
       JSON.parse(readFileSync(join(dir, "pre-migration.json"), "utf8"))
         .sessions[0].id,
     ).toBe(id);
-    expect(sqlite.pragma("user_version", { simple: true })).toBe(2);
+    expect(sqlite.pragma("user_version", { simple: true })).toBe(3);
     expect((await rows(id))[0].completed).toBe(1);
-    sqlite.pragma("user_version=3");
+    sqlite.pragma("user_version=4");
     await expect(migrate(adapter(sqlite))).rejects.toThrow("禁止降级");
   });
   it("CSV includes Chinese header, quoted names, decimals and all fields", async () => {
@@ -370,14 +370,290 @@ it("sample week fills training days without touching existing plans or history",
 });
 
 it("plan-only import preserves active sessions and rejects invalid input atomically", async () => {
-  const id = await monday(), sessionId = await svc.start(id);
+  const id = await monday(),
+    sessionId = await svc.start(id);
   const before = await svc.session(sessionId);
-  const data = { format: "fitlog-plans", version: 1, days: [{weekday: 1, name: "我的卧推", rest: false, exercises: [{name: "平板卧推", weights: [30,35,40,30], reps_min: 8, reps_max: 12}]}] };
+  const data = {
+    format: "fitlog-plans",
+    version: 1,
+    days: [
+      {
+        weekday: 1,
+        name: "我的卧推",
+        rest: false,
+        exercises: [
+          {
+            name: "平板卧推",
+            weights: [30, 35, 40, 30],
+            reps_min: 8,
+            reps_max: 12,
+          },
+        ],
+      },
+    ],
+  };
   expect(await svc.importPlansJSON(JSON.stringify(data))).toBe(1);
   expect(await svc.session(sessionId)).toEqual(before);
   const plan = await svc.plan(id);
-  expect(plan.exercises[0].sets.map((s: any) => s.default_weight)).toEqual([30,35,40,30]);
+  expect(plan.exercises[0].sets.map((s: any) => s.default_weight)).toEqual([
+    30, 35, 40, 30,
+  ]);
   data.days[0].exercises[0].weights[1] = -1;
   expect(() => svc.importPlansJSON(JSON.stringify(data))).toThrow();
   expect(await svc.plan(id)).toEqual(plan);
+});
+
+import { schema, v3Defaults, tables } from "../src/schema";
+import { groups } from "../src/domain";
+async function unilateral() {
+  const p = await prep([10, 20, 30]);
+  const plan = await svc.plan(p);
+  plan.exercises[0].mode = "unilateral";
+  plan.exercises[0].target_reps_min = 8;
+  plan.exercises[0].target_reps_max = 12;
+  plan.exercises[0].sets[0].default_weight_left = 10;
+  plan.exercises[0].sets[0].default_weight_right = 12;
+  await svc.savePlan(plan);
+  return p;
+}
+describe("V3 sides, notes and compatibility", () => {
+  it("separate side propagation, logical completion, addition and deletion", async () => {
+    const p = await unilateral(),
+      id = await svc.start(p),
+      e = (await svc.session(id)).exercises[0];
+    expect(e.sets.map((s: any) => s.weight)).toEqual([10, 12, 10, 12, 10, 12]);
+    await svc.editSet(e.id, e.sets[0].id, {
+      weight: 15,
+      reps: 10,
+      completed: 1,
+    });
+    expect((await rows(id)).map((s: any) => s.weight)).toEqual([
+      15, 12, 15, 12, 15, 12,
+    ]);
+    expect(
+      groups(await rows(id)).filter((g) => g.every((s) => s.completed)),
+    ).toHaveLength(0);
+    await svc.editSet(e.id, e.sets[1].id, { reps: 11, completed: 1 });
+    expect(
+      groups(await rows(id)).filter((g) => g.every((s) => s.completed)),
+    ).toHaveLength(1);
+    await svc.addSet(e.id);
+    expect((await rows(id)).slice(-2).map((s: any) => s.weight)).toEqual([
+      15, 12,
+    ]);
+    await svc.deleteSet(e.id, e.sets[2].id);
+    expect((await rows(id)).map((s: any) => s.set_index)).toEqual([
+      1, 1, 2, 2, 3, 3,
+    ]);
+  });
+  it("inherits each side independently and preserves locked sets", async () => {
+    const p = await unilateral(),
+      old = await svc.start(p),
+      e = (await svc.session(old)).exercises[0];
+    for (let i = 0; i < e.sets.length; i++)
+      await svc.editSet(e.id, e.sets[i].id, {
+        weight: 20 + i,
+        reps: 8 + i,
+        rir: 2,
+        completed: 1,
+      });
+    await svc.finish(old);
+    const id = await svc.start(p),
+      r = await rows(id);
+    expect(r.map((s: any) => s.weight)).toEqual([20, 21, 22, 23, 24, 25]);
+    expect(
+      r.every((s: any) => s.reps === null && s.rir === null && !s.completed),
+    ).toBe(true);
+    const x = (await svc.session(id)).exercises[0];
+    await svc.addSet(x.id);
+    expect((await rows(id)).slice(-2).map((s: any) => s.weight)).toEqual([
+      24, 25,
+    ]);
+    await svc.editSet(x.id, r[0].id, { weight: 99 });
+    expect((await rows(id))[2].weight).toBe(22);
+    const edit = await svc.session(old);
+    edit.exercises[0].sets[1].weight = 35;
+    await svc.saveHistory(edit);
+    expect((await rows(await svc.start(p)))[1].weight).toBe(35);
+    expect((await rows(id))[1].weight).toBe(21);
+  });
+  it("mode and target snapshots survive plan changes; bilateral history never becomes left history", async () => {
+    const p = await prep([30]),
+      old = await svc.start(p);
+    await complete(old, [30]);
+    const snapshot = await svc.session(old);
+    const plan = await svc.plan(p);
+    plan.exercises[0].mode = "unilateral";
+    plan.exercises[0].sets[0].default_weight_left = 30;
+    plan.exercises[0].sets[0].default_weight_right = 30;
+    plan.exercises[0].target_reps_min = 12;
+    plan.exercises[0].target_reps_max = 12;
+    await svc.savePlan(plan);
+    expect(await svc.session(old)).toEqual(snapshot);
+    const fresh = await svc.session(await svc.start(p));
+    expect(fresh.exercises[0]).toMatchObject({
+      mode: "unilateral",
+      target_reps_min: 12,
+      target_reps_max: 12,
+    });
+    expect(
+      fresh.exercises[0].sets.every((s: any) => s.weight_source === "plan"),
+    ).toBe(true);
+  });
+  it("notes and reminder persist after reopen, reminders do not override weights; full JSON roundtrip", async () => {
+    const p = await unilateral(),
+      id = await svc.start(p),
+      e = (await svc.session(id)).exercises[0];
+    await svc.editExerciseNotes(e.id, {
+      notes: "左侧控制更好，逗号,换行\n测试",
+      next_reminder: "下次尝试 50 kg",
+    });
+    await svc.editSet(e.id, e.sets[0].id, { reps: 12, rir: 1 });
+    sqlite.close();
+    sqlite = new Database(path);
+    await migrate(adapter(sqlite));
+    svc = new FitLog(new Repository(adapter(sqlite)));
+    expect((await svc.session(id)).exercises[0].notes).toContain("左侧");
+    const fresh = await svc.session(await svc.start(p));
+    expect(fresh.exercises[0].next_reminder_snapshot).toBe("下次尝试 50 kg");
+    expect(fresh.exercises[0].sets[0].weight).toBe(10);
+    const backup = await svc.exportJSON();
+    await svc.restore(backup);
+    expect((await svc.session(id)).exercises[0].sets[0]).toMatchObject({
+      side: "left",
+      reps: 12,
+      rir: 1,
+    });
+    const csv = await svc.exportCSV();
+    expect(csv).toContain('"侧别"');
+    expect(csv).toContain('"左"');
+    expect(csv).toContain('"动作备注"');
+    const bad = JSON.parse(backup);
+    bad.session_sets.pop();
+    await expect(svc.restore(JSON.stringify(bad))).rejects.toThrow(
+      "左右组结构",
+    );
+    expect((await svc.session(id)).exercises[0].notes).toContain("左侧");
+  });
+  it("historical action notes save explicitly and reject wrong session ownership", async () => {
+    const p = await prep([30]),
+      a = await svc.start(p),
+      b = await svc.start(p),
+      draft = await svc.session(a);
+    draft.exercises[0].notes = "历史修改";
+    expect((await svc.session(a)).exercises[0].notes).toBe("");
+    await svc.saveHistory(draft);
+    expect((await svc.session(a)).exercises[0].notes).toBe("历史修改");
+    draft.exercises[0].id = (await svc.session(b)).exercises[0].id;
+    await expect(svc.saveHistory(draft)).rejects.toThrow("归属");
+    expect((await svc.session(b)).exercises[0].notes).toBe("");
+  });
+  it("restores old V2 backups preserving old independent exercises as bilateral", async () => {
+    const p = await prep([30]),
+      id = await svc.start(p);
+    await complete(id, [30]);
+    const data = JSON.parse(await svc.exportJSON());
+    data.schema_version = 2;
+    for (const t of tables)
+      for (const row of data[t])
+        for (const key of Object.keys(v3Defaults[t] ?? {})) delete row[key];
+    await svc.restore(JSON.stringify(data));
+    expect((await rows(id))[0]).toMatchObject({
+      side: "both",
+      weight: 30,
+      completed: 1,
+    });
+  });
+  it("real old schema migrates non-destructively and failed table rebuild rolls back", async () => {
+    const p = await prep([30]),
+      id = await svc.start(p);
+    await complete(id, [30]);
+    const data = JSON.parse(await svc.exportJSON());
+    const old = new Database(join(dir, "old.sqlite"));
+    old.exec(schema);
+    old.pragma("user_version=2");
+    for (const t of tables)
+      for (const row of data[t]) {
+        const copy = { ...row };
+        for (const key of Object.keys(v3Defaults[t] ?? {})) delete copy[key];
+        const keys = Object.keys(copy);
+        old
+          .prepare(
+            `INSERT INTO ${t} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
+          )
+          .run(...keys.map((k) => copy[k]));
+      }
+    const db = adapter(old),
+      exec = db.exec;
+    db.exec = async (sql) => {
+      if (sql.includes("INSERT INTO session_sets_v3"))
+        throw Error("simulated write failure");
+      await exec(sql);
+    };
+    await expect(migrate(db)).rejects.toThrow("simulated");
+    expect(old.pragma("user_version", { simple: true })).toBe(2);
+    expect(old.prepare("SELECT weight FROM session_sets").get()).toEqual({
+      weight: 30,
+    });
+    db.exec = exec;
+    await migrate(db);
+    expect(old.pragma("user_version", { simple: true })).toBe(3);
+    expect(
+      old.prepare("SELECT weight,side,completed FROM session_sets").get(),
+    ).toEqual({ weight: 30, side: "both", completed: 1 });
+    old.close();
+  });
+});
+
+it("temporary unilateral actions and paired history validity", async () => {
+  const p = await prep([30]),
+    id = await svc.start(p);
+  await svc.addSessionExercise(id, "单臂划船", "unilateral");
+  let s = await svc.session(id);
+  const e = s.exercises[1];
+  expect(e.mode).toBe("unilateral");
+  expect(e.sets.map((x: any) => x.side)).toEqual(["left", "right"]);
+  await svc.editSet(s.exercises[0].id, s.exercises[0].sets[0].id, {
+    reps: 12,
+    completed: 1,
+  });
+  for (const set of e.sets)
+    await svc.editSet(e.id, set.id, {
+      weight: set.side === "left" ? 10 : 12,
+      reps: 12,
+      completed: 1,
+    });
+  await svc.finish(id);
+  s = await svc.session(id);
+  s.exercises[1].sets[1].completed = 0;
+  await svc.saveHistory(s);
+  expect(await svc.r.history(e.exercise_id, 1, "left")).toBeUndefined();
+  await svc.addSessionExercise(await svc.start(p), "单臂划船", "unilateral");
+});
+it("plan-only unilateral import accepts side defaults including intentional empty", async () => {
+  const p = await monday();
+  await svc.importPlansJSON(
+    JSON.stringify({
+      format: "fitlog-plans",
+      version: 1,
+      days: [
+        {
+          weekday: 1,
+          name: "左右",
+          rest: false,
+          exercises: [
+            {
+              name: "侧平举",
+              mode: "unilateral",
+              weights: [15],
+              weights_left: [null],
+              weights_right: [12],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const r = await rows(await svc.start(p));
+  expect(r.map((s: any) => s.weight)).toEqual([null, 12]);
 });

@@ -1,6 +1,12 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { CapacitorSQLite, SQLiteConnection } from "@capacitor-community/sqlite";
-import { schema, version, tables } from "./schema";
+import {
+  schema,
+  version,
+  tables,
+  migration3Columns,
+  sideSetsSchema,
+} from "./schema";
 export interface DB {
   backup?(text: string): Promise<void>;
   exec(sql: string): Promise<void>;
@@ -45,29 +51,46 @@ export async function migrate(db: DB) {
   await db.exec("PRAGMA foreign_keys=ON;");
   const v = (await db.all("PRAGMA user_version"))[0].user_version;
   if (v > version) throw new Error("数据库版本高于此应用，禁止降级打开");
-  // Migration 0→1 creates the schema; 1→2 adds a history lookup index without modifying records.
-  if (v === 0) {
-    await transaction(db, async () => {
-      await db.exec(schema);
-    });
+  if (v > 0 && v < version) {
+    if (!db.backup) throw Error("缺少迁移备份能力");
+    const snapshot: any = {
+      schema_version: v,
+      exported_at: new Date().toISOString(),
+    };
+    for (const table of tables)
+      snapshot[table] = await db.all(`SELECT * FROM ${table}`);
+    await db.backup(JSON.stringify(snapshot));
   }
-  if (v < 2) {
-    if (v === 1) {
-      if (!db.backup) throw Error("缺少迁移备份能力");
-      const snapshot: any = {
-        schema_version: 1,
-        exported_at: new Date().toISOString(),
-      };
-      for (const table of tables)
-        snapshot[table] = await db.all(`SELECT * FROM ${table}`);
-      await db.backup(JSON.stringify(snapshot));
-    }
-    await transaction(db, async () => {
+  await transaction(db, async () => {
+    if (v === 0) await db.exec(schema);
+    if (v < 2)
       await db.exec(
-        "CREATE INDEX IF NOT EXISTS idx_sets_history ON session_sets(set_index,completed,session_exercise_id); PRAGMA user_version=2;",
+        "CREATE INDEX IF NOT EXISTS idx_sets_history ON session_sets(set_index,completed,session_exercise_id);",
       );
-    });
-  }
+    if (v < 3) {
+      for (const [table, column, definition] of migration3Columns) {
+        const columns = await db.all(`PRAGMA table_info(${table})`);
+        if (!columns.some((c) => c.name === column))
+          await db.exec(
+            `ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`,
+          );
+      }
+      const columns = await db.all("PRAGMA table_info(session_sets)");
+      if (!columns.some((c) => c.name === "side")) {
+        const names = columns.map((c) => c.name).join(",");
+        await db.exec(sideSetsSchema);
+        await db.exec(
+          `INSERT INTO session_sets_v3 (${names}) SELECT ${names} FROM session_sets; DROP TABLE session_sets; ALTER TABLE session_sets_v3 RENAME TO session_sets;`,
+        );
+      }
+      await db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_sets_parent ON session_sets(session_exercise_id,set_index); CREATE INDEX IF NOT EXISTS idx_sets_history ON session_sets(set_index,completed,session_exercise_id,side);",
+      );
+    }
+    await db.exec(`PRAGMA user_version=${version};`);
+    if ((await db.all("PRAGMA foreign_key_check")).length)
+      throw Error("迁移引用检查失败");
+  });
   const check = await db.all("PRAGMA integrity_check");
   if (check[0].integrity_check !== "ok")
     throw new Error("数据库完整性检查失败");

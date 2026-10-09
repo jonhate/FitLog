@@ -1,4 +1,4 @@
-export const version = 2;
+export const version = 3;
 export const tables = [
   "exercises",
   "plans",
@@ -21,3 +21,47 @@ CREATE INDEX IF NOT EXISTS idx_se_exercise ON session_exercises(exercise_id,sess
 CREATE INDEX IF NOT EXISTS idx_sets_parent ON session_sets(session_exercise_id,set_index);
 CREATE INDEX IF NOT EXISTS idx_pe_plan ON plan_exercises(plan_id,sort_order);
 PRAGMA user_version=1;`;
+
+export const v3Defaults: Record<string, Record<string, unknown>> = {
+  exercises: { next_reminder: "" },
+  plan_exercises: { mode: "bilateral" },
+  plan_sets: { default_weight_left: null, default_weight_right: null },
+  session_exercises: {
+    mode: "bilateral",
+    target_reps_min: null,
+    target_reps_max: null,
+    notes: "",
+    next_reminder_snapshot: "",
+  },
+  session_sets: { side: "both" },
+};
+export const migration3Columns = [
+  ["exercises", "next_reminder", "TEXT NOT NULL DEFAULT ''"],
+  [
+    "plan_exercises",
+    "mode",
+    "TEXT NOT NULL DEFAULT 'bilateral' CHECK(mode IN('bilateral','unilateral'))",
+  ],
+  ["plan_sets", "default_weight_left", "REAL CHECK(default_weight_left>=0)"],
+  ["plan_sets", "default_weight_right", "REAL CHECK(default_weight_right>=0)"],
+  [
+    "session_exercises",
+    "mode",
+    "TEXT NOT NULL DEFAULT 'bilateral' CHECK(mode IN('bilateral','unilateral'))",
+  ],
+  ["session_exercises", "target_reps_min", "INTEGER"],
+  ["session_exercises", "target_reps_max", "INTEGER"],
+  ["session_exercises", "notes", "TEXT NOT NULL DEFAULT ''"],
+  ["session_exercises", "next_reminder_snapshot", "TEXT NOT NULL DEFAULT ''"],
+] as const;
+export const sideSetsSchema = schema
+  .match(/CREATE TABLE IF NOT EXISTS session_sets\(.*?;/)![0]
+  .replace("IF NOT EXISTS session_sets", "session_sets_v3")
+  .replace(
+    "updated_at TEXT NOT NULL,CHECK",
+    "updated_at TEXT NOT NULL,side TEXT NOT NULL DEFAULT 'both' CHECK(side IN('both','left','right')),CHECK",
+  )
+  .replace(
+    "UNIQUE(session_exercise_id,set_index)",
+    "UNIQUE(session_exercise_id,set_index,side)",
+  );
