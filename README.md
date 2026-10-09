@@ -4,7 +4,7 @@ Android 离线力量训练记录器。UI → Service → Repository → 原生 S
 
 ## 交付与验证边界
 
-请查看 `docs/TEST_RESULTS.md` 中的实际构建与测试状态。自动测试通过不等于已通过手机端验收；设备相关未验证项列在 `docs/DEVICE_CHECKLIST.md`。
+最新修复请查看 `docs/V1.3.2_TEST_RESULTS.md`；较早构建与测试状态保留在 `docs/TEST_RESULTS.md`。自动测试通过不等于已通过手机端验收；设备相关未验证项列在 `docs/DEVICE_CHECKLIST.md`。
 
 ## 目录
 
@@ -101,7 +101,7 @@ JSON 包含 `schema_version`、`exported_at` 和七张表，含计划、所有�
 按 `docs/DEVICE_CHECKLIST.md` 逐项检查：关闭重开、强制停止、重启、系统返回、软键盘、Documents 实际文件、卸载后从 JSON 恢复等。在设备验收完成前，建议同时保留现有训练记录。
 
 ## 计划专用导入
-设置 → 导入训练计划 JSON。格式见 docs/plan-import-example.json，weekday为1至7，weights每个元素代表一组预设重量，null代表留空。仅替换文件包含的日期计划，保留训练历史和未完成训练。完整备份恢复仍是独立操作。示例周计划现在包含五个力量训练日，周三和周日休息。旧安装可在周计划点击“补全空白日期的示例动作”，不覆盖已有动作。
+设置 → 导入训练计划 JSON。格式见 docs/plan-import-example.json，weekday为1至7，weights每个元素代表一组预设重量，null代表留空。仅替换文件包含的日期计划，保留训练历史和未完成训练。完整备份恢复仍是独立操作。示例周计划现在包含五个力量训练日，周三和周日休息。示例补全按钮已移除，已有计划均由用户自行编辑。
 
 此前修正版文件FitLog-V1.1-debug.apk采用原APK替换发布前端资源后重新对齐、签名产生，详情见测试报告。APK内部版本保持1.0；原开发签名保持一致。
 
@@ -116,3 +116,9 @@ JSON 包含 `schema_version`、`exported_at` 和七张表，含计划、所有�
 - 完整 JSON 包括左右侧、动作模式、独立预设、备注和提醒；CSV 单侧动作每侧一行，以侧别区分。数据概览、训练进度与恢复结果按逻辑组计数。
 
 本轮文件 `FitLog-V1.3-debug.apk` 延用原成功构建的原生包，更新发布前端资源后对齐、重新签名。完整 Gradle 重建因缺少插件缓存失败；内部 Android versionCode=1/versionName=1.0，界面和文件名标记 V1.3。详情、测试结果与未验证事项见 `docs/TEST_RESULTS.md`。覆盖安装前请先用旧版导出 JSON 到 Documents，保持原应用 ID 与签名，直接安装新版，不卸载旧版。
+
+## V1.3.2 升级修复
+
+修复Android多条SQL批次只执行首条导致的 `ss.side` 缺失。按实际表结构识别未完成升级，保护快照成功后事务修复，不依赖错误的版本标记、不清空旧记录。休息日与空计划不会触发无效开始训练；已移除示例补全按钮。
+
+保留独立JSON备份后直接覆盖安装V1.3.2，不卸载、不清除数据，也不先用完整替换恢复。恢复JSON确实会覆盖当前全部计划、历史和草稿，不是追加导入。最新版APK及测试报告请查看GitHub `releases/` 与 `docs/V1.3.2_TEST_RESULTS.md`。

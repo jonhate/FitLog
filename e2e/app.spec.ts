@@ -281,3 +281,45 @@ test("unilateral logical groups, optional fixed target, notes and reminder", asy
     page.getByRole("textbox", { name: "本次感受", exact: true }),
   ).toHaveValue("历史补充");
 });
+
+test("rest day does not start or error; switching plans and toggling rest restores start", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "使用示例周计划", exact: true })
+    .click();
+  await page
+    .getByRole("combobox", { name: "选择训练计划" })
+    .selectOption({ label: "周三 · 休息或有氧" });
+  await expect(
+    page.getByRole("button", { name: "今日休息", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "开始训练", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "选择训练计划" })
+    .selectOption({ label: "周一 · 胸 + 肩 + 三头" });
+  await page.getByRole("button", { name: "编辑此计划", exact: true }).click();
+  await page.getByRole("switch", { name: "设为休息日" }).check();
+  await page.getByRole("button", { name: "保存计划", exact: true }).click();
+  await page.getByRole("button", { name: "← 返回周计划", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "今日休息", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByText("平板卧推", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "编辑此计划", exact: true }).click();
+  await page.getByRole("switch", { name: "设为休息日" }).uncheck();
+  await page.getByRole("button", { name: "保存计划", exact: true }).click();
+  await page.getByRole("button", { name: "← 返回周计划", exact: true }).click();
+  await page.getByRole("button", { name: "开始训练", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "平板卧推", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "周计划", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "补全空白日期的示例动作", exact: true }),
+  ).toHaveCount(0);
+});

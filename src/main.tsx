@@ -197,7 +197,9 @@ function App() {
     [backup, setBackup] = useState<string | null>(null),
     [stats, setStats] = useState<any>(null);
   const refresh = async () => {
-    const ps = await service.r.all("SELECT * FROM plans ORDER BY weekday");
+    const ps = await service.r.all(
+      "SELECT p.*,(SELECT COUNT(*) FROM plan_exercises pe WHERE pe.plan_id=p.id) exercise_count FROM plans p ORDER BY weekday",
+    );
     setPlans(ps);
     setSelection((x) =>
       ps.some((p) => p.id === x)
@@ -361,7 +363,7 @@ function App() {
       <header>
         <div>
           <strong>
-            FitLog<span>V1.3</span>
+            FitLog<span>V1.3.2</span>
           </strong>
           <small>本地 · 离线 · 属于你</small>
         </div>
@@ -903,6 +905,7 @@ function App() {
               <section>
                 <small>今日安排</small>
                 <select
+                  aria-label="选择训练计划"
                   value={selection}
                   onChange={(e) => setSelection(e.target.value)}
                 >
@@ -912,10 +915,21 @@ function App() {
                     </option>
                   ))}
                 </select>
-                {selected?.rest && <p>休息日 · 也可以选择其他日计划训练</p>}
-                <PlanPreview id={selection} />
+                {selected?.rest ? (
+                  <p>今日休息。如需训练，请在上方选择其他日期的计划。</p>
+                ) : (
+                  !selected?.exercise_count && (
+                    <p>该计划还没有动作，请先编辑计划。</p>
+                  )
+                )}
+                <PlanPreview
+                  key={`${selection}-${selected?.version}`}
+                  id={selection}
+                />
                 <button
-                  disabled={busy}
+                  disabled={
+                    busy || !!selected?.rest || !selected?.exercise_count
+                  }
                   className="primary"
                   onClick={() =>
                     action(async () => {
@@ -924,7 +938,7 @@ function App() {
                     })
                   }
                 >
-                  开始训练
+                  {selected?.rest ? "今日休息" : "开始训练"}
                 </button>
                 <button
                   className="subtle"
@@ -953,20 +967,7 @@ function App() {
             </>
           ) : tab === "周计划" ? (
             <>
-              <p>
-                示例动作可编辑；重量按你的实际情况填写。周三、周日为休息日。
-              </p>
-              <button
-                onClick={() =>
-                  action(async () => {
-                    await service.fillEmptySampleDays();
-                    await refresh();
-                    setMessage("已补全空白训练日，已有动作保持原样");
-                  })
-                }
-              >
-                补全空白日期的示例动作
-              </button>
+              <p>每一天的动作和休息状态均可编辑，重量按实际情况填写。</p>
               {plans.map((p) => (
                 <section key={p.id}>
                   <small>
@@ -1042,7 +1043,7 @@ function App() {
               <p>
                 {stats?.sessions} 次训练 · {stats?.sets} 个完成组
               </p>
-              <p>数据库 v3 · 应用 1.0.0（V1.3）</p>
+              <p>数据库 v3 · 应用 1.0.0（V1.3.2）</p>
               <p>
                 卸载或清除应用数据会删除数据库。请将JSON备份保存到独立目录。
               </p>
@@ -1080,12 +1081,12 @@ function App() {
                 disabled={busy}
                 onClick={() => action(async () => setBackup(await openFile()))}
               >
-                选择 JSON 恢复文件
+                选择完整备份（覆盖恢复）
               </button>
               {backup && (
                 <div className="error">
                   <p>
-                    恢复将完整替换所有现有计划、草稿和历史。请先导出当前JSON。
+                    完整恢复会删除当前全部计划、草稿和历史，再写入备份内容，不会合并。备份导出后新增的数据会被覆盖。仅查看历史或修复升级问题不需要恢复，请先取消。
                   </p>
                   <button
                     disabled={busy}
@@ -1101,7 +1102,7 @@ function App() {
                         });
                     }}
                   >
-                    确认替换恢复
+                    覆盖全部数据并恢复
                   </button>
                   <button onClick={() => setBackup(null)}>取消</button>
                 </div>
@@ -1159,7 +1160,9 @@ function PlanPreview({ id }: { id: string }) {
   }, [id]);
   return (
     <div>
-      {p?.exercises.length ? (
+      {p?.rest ? (
+        <p>休息恢复 · 可选择其他日期的计划训练</p>
+      ) : p?.exercises.length ? (
         p.exercises.map((e: any) => (
           <div className="row preview" key={e.id}>
             <span>

@@ -343,6 +343,7 @@ export class FitLog {
     return this.write(() =>
       this.r.tx(async () => {
         const p = await this.plan(plan);
+        if (p.rest) throw Error("该计划为休息日，请选择其他日期的训练计划");
         if (!p.exercises.length) throw Error("请先为该计划添加动作");
         const id = uuid();
         await this.r.insert("sessions", {

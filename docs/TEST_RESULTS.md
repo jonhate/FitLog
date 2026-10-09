@@ -14,7 +14,7 @@
 | 与 V1.2 原生文件逐字节比对 | 一致 |
 | ADB 设备列表 | 无设备 |
 | 真机升级、持久化与 Documents 导出恢复 | 未验证 |
-| GitHub 同步 | 本次使用用户授权 token 经 HTTPS Git 推送 V1.3；连接集成此前仍返回403 |
+| GitHub 同步 | 未成功；create_blob 返回403 Resource not accessible by integration |
 
 APK：`FitLog-V1.3-debug.apk`，24,468,424 字节。SHA256：`04017f911df27079cfe9a9f7774a89836dc655856fd394b2fecef2ed9cf26bde`。
 

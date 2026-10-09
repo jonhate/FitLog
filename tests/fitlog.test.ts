@@ -657,3 +657,163 @@ it("plan-only unilateral import accepts side defaults including intentional empt
   const r = await rows(await svc.start(p));
   expect(r.map((s: any) => s.weight)).toEqual([null, 12]);
 });
+
+it("rest plans cannot create sessions, retain actions, and can be re-enabled", async () => {
+  const p = await prep([30]),
+    plan = await svc.plan(p);
+  plan.rest = 1;
+  await svc.savePlan(plan);
+  const before = await svc.r.all("SELECT id FROM sessions");
+  await expect(svc.start(p)).rejects.toThrow("休息日");
+  expect(await svc.r.all("SELECT id FROM sessions")).toEqual(before);
+  expect((await svc.plan(p)).exercises).toHaveLength(1);
+  plan.rest = 0;
+  await svc.savePlan(plan);
+  expect((await rows(await svc.start(p)))[0].weight).toBe(30);
+});
+
+import { nativeAdapter, sqlStatements, NativeSQLiteBridge } from "../src/db";
+import { migration3Columns, sideSetsSchema } from "../src/schema";
+function androidBridge(d: Database.Database): NativeSQLiteBridge {
+  return {
+    // Mirrors the native plugin's ";\\n" batch separator and execSQL's first-statement behavior.
+    execute: async (sql) => {
+      for (const chunk of sql.split(";\n")) {
+        const first = sqlStatements(chunk)[0];
+        if (first) d.exec(first);
+      }
+      return {};
+    },
+    run: async (sql, values) => {
+      d.prepare(sql).run(...values);
+      return {};
+    },
+    query: async (sql, values) => ({ values: d.prepare(sql).all(...values) }),
+  };
+}
+async function legacyFixture() {
+  const p = await prep([30]),
+    id = await svc.start(p);
+  await complete(id, [30]);
+  const snapshot = JSON.parse(await svc.exportJSON()),
+    old = new Database(join(dir, "native.sqlite"));
+  old.exec(schema);
+  old.pragma("user_version=2");
+  for (const table of tables)
+    for (const row of snapshot[table]) {
+      const copy = { ...row };
+      for (const key of Object.keys(v3Defaults[table] ?? {})) delete copy[key];
+      const keys = Object.keys(copy);
+      old
+        .prepare(
+          `INSERT INTO ${table} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
+        )
+        .run(...keys.map((k) => copy[k]));
+    }
+  return { old, id, p };
+}
+describe("Android bridge migration regression", () => {
+  it("dispatches same-line SQL statements individually without splitting literals", async () => {
+    expect(
+      sqlStatements(
+        "CREATE TABLE x(v TEXT); INSERT INTO x VALUES('a;b'); SELECT * FROM x;",
+      ),
+    ).toHaveLength(3);
+    const db = new Database(":memory:");
+    const bridge = nativeAdapter(androidBridge(db), async () => {});
+    await bridge.exec("CREATE TABLE x(v TEXT); INSERT INTO x VALUES('a;b');");
+    expect(await bridge.all("SELECT * FROM x")).toEqual([{ v: "a;b" }]);
+    db.close();
+  });
+  it("native bridge upgrades actual V2 then opens history, edits and starts a fresh session", async () => {
+    const { old, id, p } = await legacyFixture();
+    const db = nativeAdapter(androidBridge(old), async (text) =>
+      writeFileSync(join(dir, "native-backup.json"), text),
+    );
+    await migrate(db);
+    const service = new FitLog(new Repository(db));
+    expect((await service.session(id)).exercises[0].sets[0]).toMatchObject({
+      weight: 30,
+      side: "both",
+    });
+    const history = await service.session(id);
+    history.exercises[0].sets[0].weight = 35;
+    await service.saveHistory(history);
+    expect(
+      (await service.session(await service.start(p))).exercises[0].sets[0]
+        .weight,
+    ).toBe(35);
+    old.close();
+  });
+  it("repairs version3 marker with old group table and stale temporary copy without losing current records", async () => {
+    const { old, id, p } = await legacyFixture();
+    for (const [table, column, type] of migration3Columns)
+      old.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    old.exec(sideSetsSchema);
+    old.exec(
+      "INSERT INTO session_sets_v3 (id,session_exercise_id,set_index,weight,reps,rir,completed,weight_source,default_weight,updated_at) SELECT id,session_exercise_id,set_index,weight,reps,rir,completed,weight_source,default_weight,updated_at FROM session_sets",
+    );
+    old.pragma("user_version=3");
+    old.exec(
+      "UPDATE session_sets SET weight=33; UPDATE session_exercises SET notes='升级后已有备注'",
+    );
+    let protection: any;
+    const db = nativeAdapter(androidBridge(old), async (text) => {
+      protection = JSON.parse(text);
+    });
+    await migrate(db);
+    const service = new FitLog(new Repository(db));
+    expect((await service.session(id)).exercises[0]).toMatchObject({
+      notes: "升级后已有备注",
+    });
+    expect((await service.session(id)).exercises[0].sets[0].weight).toBe(33);
+    expect(protection.session_sets[0].weight).toBe(33);
+    expect(protection.migration_artifacts.session_sets_v3[0].weight).toBe(30);
+    expect(
+      (await service.session(await service.start(p))).exercises[0].sets[0]
+        .weight,
+    ).toBe(33);
+    expect(
+      await db.all(
+        "SELECT name FROM sqlite_master WHERE name='session_sets_v3'",
+      ),
+    ).toHaveLength(0);
+    await service.restore(JSON.stringify(protection));
+    expect((await service.session(id)).exercises[0].sets[0].weight).toBe(33);
+    old.close();
+  });
+  it("repair protection failure and interrupted rebuilding both preserve the old authoritative records", async () => {
+    const { old, id } = await legacyFixture();
+    old.pragma("user_version=3");
+    const bridge = androidBridge(old);
+    await expect(
+      migrate(
+        nativeAdapter(bridge, async () => {
+          throw Error("backup unavailable");
+        }),
+      ),
+    ).rejects.toThrow("backup unavailable");
+    expect(old.prepare("SELECT weight FROM session_sets").get()).toEqual({
+      weight: 30,
+    });
+    const exec = bridge.execute;
+    bridge.execute = async (sql, transaction) => {
+      if (sql.startsWith("DROP TABLE session_sets;"))
+        throw Error("simulated native failure");
+      return exec(sql, transaction);
+    };
+    await expect(
+      migrate(nativeAdapter(bridge, async () => {})),
+    ).rejects.toThrow("simulated native failure");
+    expect(old.prepare("SELECT weight FROM session_sets").get()).toEqual({
+      weight: 30,
+    });
+    expect(
+      old
+        .prepare("PRAGMA table_info(session_sets)")
+        .all()
+        .some((c: any) => c.name === "side"),
+    ).toBe(false);
+    old.close();
+  });
+});
