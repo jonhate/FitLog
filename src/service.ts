@@ -256,6 +256,12 @@ export class FitLog {
   savePlan(p: any) {
     if (!p.name.trim()) throw Error("训练名称不能为空");
     for (const e of p.exercises) {
+      if (
+        typeof e.name !== "string" ||
+        !e.name.trim() ||
+        e.name.trim().length > 100
+      )
+        throw Error("动作名称须为1至100个字符");
       if (!["bilateral", "unilateral"].includes(e.mode ?? "bilateral"))
         throw Error("动作模式无效");
       if (!e.sets.length) throw Error("动作至少需要一组");
@@ -273,9 +279,46 @@ export class FitLog {
           [p.name, p.rest, now(), p.id],
         );
         const old = await this.r.all(
-          "SELECT id FROM plan_exercises WHERE plan_id=?",
+          "SELECT id,exercise_id FROM plan_exercises WHERE plan_id=?",
           [p.id],
         );
+        const renamed = new Map<string, string>();
+        for (const e of p.exercises) {
+          if (
+            !old.some(
+              (row) => row.id === e.id && row.exercise_id === e.exercise_id,
+            )
+          )
+            throw Error("计划动作归属校验失败");
+          const name = e.name.trim();
+          if (renamed.has(e.exercise_id) && renamed.get(e.exercise_id) !== name)
+            throw Error("同一动作的名称须一致");
+          renamed.set(e.exercise_id, name);
+        }
+        for (const [id, name] of renamed) {
+          const current = (
+            await this.r.all("SELECT name FROM exercises WHERE id=?", [id])
+          )[0];
+          if (!current) throw Error("动作不存在");
+          if (current.name === name) continue;
+          if (
+            (
+              await this.r.all(
+                "SELECT id FROM exercises WHERE name=? AND id<>?",
+                [name, id],
+              )
+            ).length
+          )
+            throw Error("已有同名动作，请使用不同名称；改名不会合并训练记录");
+          await this.r.run(
+            "UPDATE exercises SET name=?,updated_at=? WHERE id=?",
+            [name, now(), id],
+          );
+          await this.r.run(
+            "UPDATE plans SET version=version+1,updated_at=? WHERE id<>? AND id IN (SELECT plan_id FROM plan_exercises WHERE exercise_id=?)",
+            [now(), p.id, id],
+          );
+        }
         for (const e of old)
           if (!p.exercises.some((x: any) => x.id === e.id))
             await this.r.run("DELETE FROM plan_exercises WHERE id=?", [e.id]);

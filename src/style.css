@@ -397,3 +397,4 @@ label select {
   font-size: 11px;
   margin-top: 3px;
 }
+.row h2 { min-width: 0; overflow-wrap: anywhere; }

@@ -1,0 +1,20 @@
+Verifies
+Verified using v1 scheme (JAR signing): true
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=FitLog Development, O=FitLog, C=CN
+Signer #1 certificate SHA-256 digest: 50f76fb0d18eb4ef44ade5316388824c603e546b5fadd35c2ff0afc9df485f28
+Signer #1 certificate SHA-1 digest: 6b2b5f5a66da8c2c69f61d15e9f49d7a1a9018bd
+Signer #1 certificate MD5 digest: e5e27566d2f0a513066c4ae20a3b63b3
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: b8be49231273149b2610f2236734885b5c673e585f602640dd45306140f0cc9b
+Signer #1 public key SHA-1 digest: 00c8327b0fba2e99e89bcf95d683d20b1995a991
+Signer #1 public key MD5 digest: a755790ef59711ca9153554088c271f4
+ZIP, alignment, frontend assets and unchanged native files: PASS
+SHA256: 2fdea89f5d43635e8d15d922690c03b42863aaf8e609c56b97bb1d8a4eaac5bd
+Bytes: 24562965

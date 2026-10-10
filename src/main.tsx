@@ -363,7 +363,7 @@ function App() {
       <header>
         <div>
           <strong>
-            FitLog<span>V1.3.2</span>
+            FitLog<span>V1.3.3</span>
           </strong>
           <small>本地 · 离线 · 属于你</small>
         </div>
@@ -697,10 +697,40 @@ function App() {
               设为休息日<small>开启后，今日页面显示休息状态</small>
             </span>
           </label>
+          <small>
+            动作改名在保存计划后生效，同一动作在其他日期同步改名；历史和已开始训练保留原名，重量继承不受影响。
+          </small>
           {plan.exercises.map((e: any, index: number) => (
             <section key={e.id}>
               <div className="row">
                 <h2>{e.name}</h2>
+                <button
+                  className="subtle"
+                  aria-label={`改名：${e.name}`}
+                  onClick={() => {
+                    const name = prompt(
+                      "修改动作名称（保存计划后生效；历史保留原名）",
+                      e.name,
+                    );
+                    if (name === null) return;
+                    const trimmed = name.trim();
+                    if (!trimmed || trimmed.length > 100) {
+                      setError("动作名称须为1至100个字符");
+                      return;
+                    }
+                    setPlan({
+                      ...plan,
+                      exercises: plan.exercises.map((x: any) =>
+                        x.exercise_id === e.exercise_id
+                          ? { ...x, name: trimmed }
+                          : x,
+                      ),
+                    });
+                    setDirty(true);
+                  }}
+                >
+                  改名
+                </button>
                 <button
                   onClick={() => {
                     const list = [...plan.exercises];
@@ -1043,7 +1073,7 @@ function App() {
               <p>
                 {stats?.sessions} 次训练 · {stats?.sets} 个完成组
               </p>
-              <p>数据库 v3 · 应用 1.0.0（V1.3.2）</p>
+              <p>数据库 v3 · 应用 1.0.0（V1.3.3）</p>
               <p>
                 卸载或清除应用数据会删除数据库。请将JSON备份保存到独立目录。
               </p>

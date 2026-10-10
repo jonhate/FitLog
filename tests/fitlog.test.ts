@@ -817,3 +817,48 @@ describe("Android bridge migration regression", () => {
     old.close();
   });
 });
+
+it("renames a stable exercise across plans without changing snapshots, weights or reminders", async () => {
+  const p = await prep([30]),
+    old = await svc.start(p);
+  await complete(old, [35]);
+  const draft = await svc.start(p),
+    before = await svc.session(old),
+    draftBefore = await svc.session(draft);
+  const plans = await svc.r.all("SELECT id FROM plans WHERE weekday=6");
+  await svc.copyPlan(p, plans[0].id);
+  const plan = await svc.plan(p),
+    exercise = plan.exercises[0].exercise_id;
+  await svc.editExerciseNotes(before.exercises[0].id, {
+    next_reminder: "下次控制离心",
+  });
+  const snapshot = await svc.session(old);
+  plan.exercises[0].name = "杠铃平板卧推";
+  await svc.savePlan(plan);
+  expect((await svc.plan(p)).exercises[0].exercise_id).toBe(exercise);
+  expect((await svc.plan(plans[0].id)).exercises[0].name).toBe("杠铃平板卧推");
+  expect(await svc.session(old)).toEqual(snapshot);
+  expect(await svc.session(draft)).toEqual(draftBefore);
+  const fresh = await svc.session(await svc.start(p));
+  expect(fresh.exercises[0]).toMatchObject({
+    exercise_id: exercise,
+    exercise_name_snapshot: "杠铃平板卧推",
+    next_reminder_snapshot: "下次控制离心",
+  });
+  expect(fresh.exercises[0].sets[0].weight).toBe(35);
+});
+it("rejects duplicate, blank names and foreign exercise ownership without changing plans", async () => {
+  const p = await prep([30]),
+    plan = await svc.plan(p);
+  await svc.addPlanExercise(p, "其他动作");
+  const before = await svc.plan(p);
+  plan.exercises[0].name = "其他动作";
+  await expect(svc.savePlan(plan)).rejects.toThrow("同名");
+  expect(await svc.plan(p)).toEqual(before);
+  plan.exercises[0].name = " ";
+  expect(() => svc.savePlan(plan)).toThrow("名称");
+  plan.exercises[0].name = "新名称";
+  plan.exercises[0].exercise_id = crypto.randomUUID();
+  await expect(svc.savePlan(plan)).rejects.toThrow("归属");
+  expect(await svc.plan(p)).toEqual(before);
+});

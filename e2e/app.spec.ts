@@ -323,3 +323,28 @@ test("rest day does not start or error; switching plans and toggling rest restor
     page.getByRole("button", { name: "补全空白日期的示例动作", exact: true }),
   ).toHaveCount(0);
 });
+
+test("exercise rename is staged until plan save; active snapshot stays original", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.getByRole("button", { name: "← 返回", exact: true }).click();
+  await page.getByRole("button", { name: "编辑此计划", exact: true }).click();
+  page.once("dialog", (d) => d.accept("杠铃平板卧推"));
+  await page.getByRole("button", { name: "改名：卧推", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "杠铃平板卧推", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "保存计划", exact: true }).click();
+  await page.getByRole("button", { name: "← 返回周计划", exact: true }).click();
+  await expect(page.getByText("杠铃平板卧推", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "继续训练", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "卧推", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "← 返回", exact: true }).click();
+  await page.getByRole("button", { name: "开始训练", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "杠铃平板卧推", exact: true }),
+  ).toBeVisible();
+});
