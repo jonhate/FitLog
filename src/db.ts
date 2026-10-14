@@ -5,6 +5,8 @@ import {
   version,
   tables,
   migration3Columns,
+  migration4Columns,
+  v4Defaults,
   sideSetsSchema,
   v3Defaults,
 } from "./schema";
@@ -99,6 +101,11 @@ async function layout(db: DB) {
     );
   return columns;
 }
+function missingV4(columns: Record<string, string[]>) {
+  return Object.entries(v4Defaults).some(([table, fields]) =>
+    Object.keys(fields).some((column) => !columns[table].includes(column)),
+  );
+}
 function missingV3(columns: Record<string, string[]>) {
   return Object.entries(v3Defaults).some(([table, fields]) =>
     Object.keys(fields).some((column) => !columns[table].includes(column)),
@@ -134,7 +141,7 @@ export async function migrate(db: DB) {
   const v = (await db.all("PRAGMA user_version"))[0].user_version;
   if (v > version) throw new Error("数据库版本高于此应用，禁止降级打开");
   const currentLayout = v > 0 ? await layout(db) : null;
-  const repair = v > 0 && missingV3(currentLayout!);
+  const repair = v > 0 && (missingV3(currentLayout!) || missingV4(currentLayout!));
   if (v > 0 && (v < version || repair)) {
     if (!db.backup) throw Error("缺少迁移备份能力");
     const snapshot: any = {
@@ -143,9 +150,13 @@ export async function migrate(db: DB) {
     };
     for (const table of tables) {
       snapshot[table] = await db.all(`SELECT * FROM ${table}`);
-      if (v === 3)
+      if (v >= 3)
         for (const row of snapshot[table])
           for (const [column, value] of Object.entries(v3Defaults[table] ?? {}))
+            if (!(column in row)) row[column] = value;
+      if (v >= 4)
+        for (const row of snapshot[table])
+          for (const [column, value] of Object.entries(v4Defaults[table] ?? {}))
             if (!(column in row)) row[column] = value;
     }
     const artifacts = await db.all(
@@ -186,7 +197,14 @@ export async function migrate(db: DB) {
         "CREATE INDEX IF NOT EXISTS idx_sets_parent ON session_sets(session_exercise_id,set_index); CREATE INDEX IF NOT EXISTS idx_sets_history ON session_sets(set_index,completed,session_exercise_id,side);",
       );
     }
-    if (missingV3(await layout(db)))
+    if (v < 4 || missingV4(await layout(db))) {
+      for (const [table, column, definition] of migration4Columns) {
+        const columns = await db.all(`PRAGMA table_info(${table})`);
+        if (!columns.some((c) => c.name === column))
+          await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+      }
+    }
+    if (missingV3(await layout(db)) || missingV4(await layout(db)))
       throw Error("数据库结构升级未完成，已停止打开并保留原数据");
     const check = await db.all("PRAGMA integrity_check");
     if (check[0].integrity_check !== "ok") throw Error("数据库完整性检查失败");

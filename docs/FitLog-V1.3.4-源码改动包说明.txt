@@ -1,0 +1,37 @@
+FitLog V1.3.4 源码改动包（不是APK）
+
+目标：仓库 jonhate/FitLog，基线为 V1.3.3。先切换 v1.3.4 分支，再应用脚本。仅使用可信来源文件。
+
+推荐由已有GitHub写入权限且已配置Android SDK的Agent执行：
+
+1. 进入完整Git仓库，确认工作区干净，并备份当前修改。
+   git fetch origin
+   git checkout v1.3.4
+   git status
+
+2. 将 fitlog_v134_apply.py 放入可访问位置，先检查能否匹配全部源码锚点。
+   python fitlog_v134_apply.py . --dry-run
+   python fitlog_v134_apply.py .
+   git diff --check
+   git diff
+
+3. 安装依赖并运行检查。
+   npm ci
+   npm test
+   npm run build
+   npm run test:ui
+
+4. 构建 Android APK（须具有JDK21 + Android SDK35 + Gradle依赖）。
+   npm run sync
+   npm run apk
+
+5. 在原生Android真机进行数据库升级、旧历史、勾选持久化、计划保存、导入导出及安装签名验收。
+   先导出旧版本完整JSON到Documents；不要卸载或清除数据。
+   检查APK是否非零大小、包名com.jon.fitlog、与已安装版本签名一致。
+   若不能保证签名一致，不能声称能覆盖升级并保留旧数据库。
+
+6. 验证通过后再提交源码及APK到GitHub。
+
+重要边界：本包中的源码修改脚本已通过Python语法检查，但无法在当前执行环境对实际仓库运行
+npm test / Android APK编译，因为当前环境缺失Android SDK且无法从GitHub下载源码。
+因此它是候选实施包，不是已验收发布版。测试若失败，应先修复，不能直接发布。
