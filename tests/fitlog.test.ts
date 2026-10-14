@@ -869,6 +869,53 @@ it("rejects duplicate, blank names and foreign exercise ownership without changi
 
 
 describe("V4 warmup/stretch workflow", () => {
+  it("upgrades a populated V3 database, preserves records and retries partial V4 upgrades", async () => {
+    const p = await prep([30]);
+    const id = await svc.start(p);
+    await complete(id, [30]);
+    const before = JSON.parse(await svc.exportJSON());
+    for (const table of ["plans", "sessions"])
+      for (const column of Object.keys(before[table][0]).filter(k => /^(warmup|stretch)_/.test(k)))
+        sqlite.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    sqlite.pragma("user_version=3");
+    await migrate(adapter(sqlite));
+    const after = JSON.parse(await svc.exportJSON());
+    for (const table of ["plans", "sessions", "session_sets", "session_exercises"])
+      expect(after[table]).toEqual(before[table]);
+    expect(JSON.parse(readFileSync(join(dir, "pre-migration.json"), "utf8")).schema_version).toBe(3);
+    sqlite.exec("ALTER TABLE sessions DROP COLUMN stretch_completed");
+    await migrate(adapter(sqlite));
+    const protection = readFileSync(join(dir, "pre-migration.json"), "utf8");
+    expect(JSON.parse(protection).sessions[0].stretch_completed).toBe(0);
+    await svc.restore(protection);
+    expect((await svc.session(id)).stretch_completed).toBe(0);
+    await migrate(adapter(sqlite));
+    expect(await svc.session(id)).toMatchObject({status: "completed", warmup_enabled: 0});
+  });
+
+  it("persists auxiliary completion on reopen and round-trips V4 backups", async () => {
+    const p = await prep([30]);
+    const plan = await svc.plan(p);
+    plan.warmup_enabled = plan.stretch_enabled = 1;
+    plan.warmup_text = "热身";
+    plan.stretch_text = "拉伸";
+    await svc.savePlan(plan);
+    const id = await svc.start(p);
+    await svc.setAuxCompleted(id, "warmup", 1);
+    const backup = await svc.exportJSON();
+    sqlite.close();
+    sqlite = new Database(path);
+    await migrate(adapter(sqlite));
+    svc = new FitLog(new Repository(adapter(sqlite)));
+    expect((await svc.session(id)).warmup_completed).toBe(1);
+    await svc.restore(backup);
+    expect((await svc.session(id)).warmup_completed).toBe(1);
+    await complete(id, [30]);
+    const historical = await svc.session(id);
+    historical.stretch_completed = 1;
+    await svc.saveHistory(historical);
+    expect((await svc.session(id)).stretch_completed).toBe(1);
+  });
   it("saves plan options and session snapshots independent of later plan edits", async () => {
     const p = await prep([30]);
     const plan = await svc.plan(p);

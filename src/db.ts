@@ -150,9 +150,13 @@ export async function migrate(db: DB) {
     };
     for (const table of tables) {
       snapshot[table] = await db.all(`SELECT * FROM ${table}`);
-      if (v === 3)
+      if (v >= 3)
         for (const row of snapshot[table])
           for (const [column, value] of Object.entries(v3Defaults[table] ?? {}))
+            if (!(column in row)) row[column] = value;
+      if (v >= 4)
+        for (const row of snapshot[table])
+          for (const [column, value] of Object.entries(v4Defaults[table] ?? {}))
             if (!(column in row)) row[column] = value;
     }
     const artifacts = await db.all(
