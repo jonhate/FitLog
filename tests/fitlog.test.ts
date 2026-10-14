@@ -234,9 +234,9 @@ describe("real SQLite integration", () => {
       JSON.parse(readFileSync(join(dir, "pre-migration.json"), "utf8"))
         .sessions[0].id,
     ).toBe(id);
-    expect(sqlite.pragma("user_version", { simple: true })).toBe(3);
+    expect(sqlite.pragma("user_version", { simple: true })).toBe(4);
     expect((await rows(id))[0].completed).toBe(1);
-    sqlite.pragma("user_version=4");
+    sqlite.pragma("user_version=5");
     await expect(migrate(adapter(sqlite))).rejects.toThrow("禁止降级");
   });
   it("CSV includes Chinese header, quoted names, decimals and all fields", async () => {
@@ -403,7 +403,7 @@ it("plan-only import preserves active sessions and rejects invalid input atomica
   expect(await svc.plan(id)).toEqual(plan);
 });
 
-import { schema, v3Defaults, tables } from "../src/schema";
+import { schema, v3Defaults, v4Defaults, tables } from "../src/schema";
 import { groups } from "../src/domain";
 async function unilateral() {
   const p = await prep([10, 20, 30]);
@@ -555,8 +555,10 @@ describe("V3 sides, notes and compatibility", () => {
     const data = JSON.parse(await svc.exportJSON());
     data.schema_version = 2;
     for (const t of tables)
-      for (const row of data[t])
+      for (const row of data[t]) {
         for (const key of Object.keys(v3Defaults[t] ?? {})) delete row[key];
+        for (const key of Object.keys(v4Defaults[t] ?? {})) delete row[key];
+      }
     await svc.restore(JSON.stringify(data));
     expect((await rows(id))[0]).toMatchObject({
       side: "both",
@@ -576,6 +578,7 @@ describe("V3 sides, notes and compatibility", () => {
       for (const row of data[t]) {
         const copy = { ...row };
         for (const key of Object.keys(v3Defaults[t] ?? {})) delete copy[key];
+        for (const key of Object.keys(v4Defaults[t] ?? {})) delete copy[key];
         const keys = Object.keys(copy);
         old
           .prepare(
@@ -597,7 +600,7 @@ describe("V3 sides, notes and compatibility", () => {
     });
     db.exec = exec;
     await migrate(db);
-    expect(old.pragma("user_version", { simple: true })).toBe(3);
+    expect(old.pragma("user_version", { simple: true })).toBe(4);
     expect(
       old.prepare("SELECT weight,side,completed FROM session_sets").get(),
     ).toEqual({ weight: 30, side: "both", completed: 1 });
@@ -703,6 +706,7 @@ async function legacyFixture() {
     for (const row of snapshot[table]) {
       const copy = { ...row };
       for (const key of Object.keys(v3Defaults[table] ?? {})) delete copy[key];
+      for (const key of Object.keys(v4Defaults[table] ?? {})) delete copy[key];
       const keys = Object.keys(copy);
       old
         .prepare(
@@ -861,4 +865,62 @@ it("rejects duplicate, blank names and foreign exercise ownership without changi
   plan.exercises[0].exercise_id = crypto.randomUUID();
   await expect(svc.savePlan(plan)).rejects.toThrow("归属");
   expect(await svc.plan(p)).toEqual(before);
+});
+
+
+describe("V4 warmup/stretch workflow", () => {
+  it("saves plan options and session snapshots independent of later plan edits", async () => {
+    const p = await prep([30]);
+    const plan = await svc.plan(p);
+    plan.warmup_enabled = 1;
+    plan.warmup_text = "快走3分钟\n卧推热身";
+    plan.stretch_enabled = 1;
+    plan.stretch_text = "胸肌拉伸30秒";
+    await svc.savePlan(plan);
+    const id = await svc.start(p);
+    const first = await svc.session(id);
+    expect(first.warmup_text).toBe("快走3分钟\n卧推热身");
+    expect(first.warmup_completed).toBe(0);
+    plan.warmup_text = "修改后的计划";
+    await svc.savePlan(plan);
+    expect((await svc.session(id)).warmup_text).toBe(first.warmup_text);
+    await svc.setAuxCompleted(id, "warmup", 1);
+    expect((await svc.session(id)).warmup_completed).toBe(1);
+    await svc.setAuxCompleted(id, "warmup", 0);
+    expect((await svc.session(id)).warmup_completed).toBe(0);
+    await complete(id, [30]); // No need to tick aux modules to finish.
+    expect((await svc.session(id)).status).toBe("completed");
+  });
+
+  it("legacy V3 backup restores with disabled auxiliary options", async () => {
+    const id = await monday();
+    const backup = JSON.parse(await svc.exportJSON());
+    backup.schema_version = 3;
+    for (const row of backup.plans)
+      for (const key of ["warmup_enabled", "warmup_text", "stretch_enabled", "stretch_text"])
+        delete row[key];
+    for (const row of backup.sessions)
+      for (const key of ["warmup_enabled", "warmup_text", "warmup_completed", "stretch_enabled", "stretch_text", "stretch_completed"])
+        delete row[key];
+    await svc.restore(JSON.stringify(backup));
+    const plan = await svc.plan(id);
+    expect(plan.warmup_enabled).toBe(0);
+    expect(plan.stretch_enabled).toBe(0);
+  });
+
+  it("copies both configurations between weekday plans", async () => {
+    const p = await monday();
+    const plan = await svc.plan(p);
+    plan.warmup_enabled = 1;
+    plan.warmup_text = "动态热身";
+    plan.stretch_enabled = 1;
+    plan.stretch_text = "静态拉伸";
+    await svc.savePlan(plan);
+    const target = (await svc.r.all("SELECT id FROM plans WHERE weekday=2"))[0].id;
+    await svc.copyPlan(p, target);
+    const cloned = await svc.plan(target);
+    expect(cloned.warmup_text).toBe("动态热身");
+    expect(cloned.stretch_text).toBe("静态拉伸");
+    expect(cloned.warmup_enabled).toBe(1);
+  });
 });

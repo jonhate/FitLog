@@ -1,4 +1,4 @@
-export const version = 3;
+export const version = 4;
 export const tables = [
   "exercises",
   "plans",
@@ -35,6 +35,25 @@ export const v3Defaults: Record<string, Record<string, unknown>> = {
   },
   session_sets: { side: "both" },
 };
+export const v4Defaults: Record<string, Record<string, unknown>> = {
+  plans: { warmup_enabled: 0, warmup_text: "", stretch_enabled: 0, stretch_text: "" },
+  sessions: {
+    warmup_enabled: 0, warmup_text: "", warmup_completed: 0,
+    stretch_enabled: 0, stretch_text: "", stretch_completed: 0,
+  },
+};
+export const migration4Columns = [
+  ["plans", "warmup_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK(warmup_enabled IN(0,1))"],
+  ["plans", "warmup_text", "TEXT NOT NULL DEFAULT ''"],
+  ["plans", "stretch_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK(stretch_enabled IN(0,1))"],
+  ["plans", "stretch_text", "TEXT NOT NULL DEFAULT ''"],
+  ["sessions", "warmup_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK(warmup_enabled IN(0,1))"],
+  ["sessions", "warmup_text", "TEXT NOT NULL DEFAULT ''"],
+  ["sessions", "warmup_completed", "INTEGER NOT NULL DEFAULT 0 CHECK(warmup_completed IN(0,1))"],
+  ["sessions", "stretch_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK(stretch_enabled IN(0,1))"],
+  ["sessions", "stretch_text", "TEXT NOT NULL DEFAULT ''"],
+  ["sessions", "stretch_completed", "INTEGER NOT NULL DEFAULT 0 CHECK(stretch_completed IN(0,1))"],
+] as const;
 export const migration3Columns = [
   ["exercises", "next_reminder", "TEXT NOT NULL DEFAULT ''"],
   [

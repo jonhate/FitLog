@@ -1,6 +1,6 @@
 import { Repository, uuid, now } from "./repository";
 import { initialWeight, propagate, valid, SetRow } from "./domain";
-import { tables, v3Defaults } from "./schema";
+import { tables, v3Defaults, v4Defaults } from "./schema";
 const sampleExercises: string[][] = [
   [
     "平板卧推",
@@ -103,6 +103,13 @@ export class FitLog {
       )
         throw Error("日期或计划字段无效");
       seen.add(d.weekday);
+      for (const field of ["warmup_enabled", "stretch_enabled"])
+        if (d[field] !== undefined && typeof d[field] !== "boolean")
+          throw Error("辅助训练开关必须为布尔值");
+      for (const field of ["warmup_text", "stretch_text"])
+        if (d[field] !== undefined &&
+          (typeof d[field] !== "string" || d[field].length > 2000))
+          throw Error("辅助训练内容无效或过长");
       for (const e of d.exercises) {
         if (e.mode != null && !["bilateral", "unilateral"].includes(e.mode))
           throw Error("动作模式无效");
@@ -151,8 +158,10 @@ export class FitLog {
             plan.id,
           ]);
           await this.r.run(
-            "UPDATE plans SET name=?,rest=?,version=version+1,updated_at=? WHERE id=?",
-            [d.name.trim(), d.rest ? 1 : 0, now(), plan.id],
+            "UPDATE plans SET name=?,rest=?,warmup_enabled=?,warmup_text=?,stretch_enabled=?,stretch_text=?,version=version+1,updated_at=? WHERE id=?",
+            [d.name.trim(), d.rest ? 1 : 0, d.warmup_enabled ? 1 : 0,
+              d.warmup_text ?? "", d.stretch_enabled ? 1 : 0,
+              d.stretch_text ?? "", now(), plan.id],
           );
           for (let i = 0; i < d.exercises.length; i++) {
             const e = d.exercises[i],
@@ -255,6 +264,11 @@ export class FitLog {
   }
   savePlan(p: any) {
     if (!p.name.trim()) throw Error("训练名称不能为空");
+    for (const flag of ["warmup_enabled", "stretch_enabled"])
+      if (![0, 1].includes(Number(p[flag]))) throw Error("辅助训练开关无效");
+    for (const field of ["warmup_text", "stretch_text"])
+      if (typeof p[field] !== "string" || p[field].length > 2000)
+        throw Error("辅助训练内容无效或过长");
     for (const e of p.exercises) {
       if (
         typeof e.name !== "string" ||
@@ -275,8 +289,9 @@ export class FitLog {
     return this.write(() =>
       this.r.tx(async () => {
         await this.r.run(
-          "UPDATE plans SET name=?,rest=?,version=version+1,updated_at=? WHERE id=?",
-          [p.name, p.rest, now(), p.id],
+          "UPDATE plans SET name=?,rest=?,warmup_enabled=?,warmup_text=?,stretch_enabled=?,stretch_text=?,version=version+1,updated_at=? WHERE id=?",
+          [p.name, p.rest, p.warmup_enabled, p.warmup_text,
+            p.stretch_enabled, p.stretch_text, now(), p.id],
         );
         const old = await this.r.all(
           "SELECT id,exercise_id FROM plan_exercises WHERE plan_id=?",
@@ -361,8 +376,9 @@ export class FitLog {
           target,
         ]);
         await this.r.run(
-          "UPDATE plans SET name=?,rest=?,version=version+1,updated_at=? WHERE id=?",
-          [p.name, p.rest, now(), target],
+          "UPDATE plans SET name=?,rest=?,warmup_enabled=?,warmup_text=?,stretch_enabled=?,stretch_text=?,version=version+1,updated_at=? WHERE id=?",
+          [p.name, p.rest, p.warmup_enabled, p.warmup_text,
+            p.stretch_enabled, p.stretch_text, now(), target],
         );
         for (const e of p.exercises) {
           const id = uuid();
@@ -397,6 +413,12 @@ export class FitLog {
           completed_at: null,
           status: "active",
           notes: "",
+          warmup_enabled: p.warmup_enabled,
+          warmup_text: p.warmup_text,
+          warmup_completed: 0,
+          stretch_enabled: p.stretch_enabled,
+          stretch_text: p.stretch_text,
+          stretch_completed: 0,
         });
         for (const e of p.exercises) {
           const seid = uuid();
@@ -637,6 +659,18 @@ export class FitLog {
       }),
     );
   }
+  setAuxCompleted(id: string, kind: "warmup" | "stretch", completed: number) {
+    if (![0, 1].includes(completed) || !["warmup", "stretch"].includes(kind))
+      throw Error("辅助训练状态无效");
+    return this.write(() => this.r.tx(async () => {
+      const rows = await this.r.all("SELECT * FROM sessions WHERE id=?", [id]);
+      if (!rows.length || rows[0].status !== "active")
+        throw Error("只能直接修改进行中训练的完成状态");
+      if (!rows[0][`${kind}_enabled`]) throw Error("此辅助训练未启用");
+      await this.r.run(`UPDATE sessions SET ${kind}_completed=? WHERE id=?`,
+        [completed, id]);
+    }));
+  }
   finish(id: string) {
     return this.write(() =>
       this.r.tx(async () => {
@@ -656,9 +690,11 @@ export class FitLog {
   saveHistory(s: any) {
     return this.write(() =>
       this.r.tx(async () => {
-        await this.r.run("UPDATE sessions SET notes=? WHERE id=?", [
-          s.notes,
-          s.id,
+        if (![0, 1].includes(s.warmup_completed) ||
+            ![0, 1].includes(s.stretch_completed))
+          throw Error("辅助训练完成状态无效");
+        await this.r.run("UPDATE sessions SET notes=?,warmup_completed=?,stretch_completed=? WHERE id=?", [
+          s.notes, s.warmup_completed, s.stretch_completed, s.id,
         ]);
         for (const e of s.exercises) {
           const owner = await this.r.all(
@@ -695,7 +731,7 @@ export class FitLog {
   exportCSV() {
     return this.write(async () => {
       const rows = await this.r.all(
-        `SELECT s.started_at,s.plan_name_snapshot,se.exercise_name_snapshot,ss.set_index,ss.weight,ss.reps,ss.rir,ss.completed,se.skipped,ss.side,se.notes,se.next_reminder_snapshot FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id ORDER BY s.started_at DESC,se.sort_order,ss.set_index,ss.side`,
+        `SELECT s.started_at,s.plan_name_snapshot,se.exercise_name_snapshot,ss.set_index,ss.weight,ss.reps,ss.rir,ss.completed,se.skipped,ss.side,se.notes,se.next_reminder_snapshot,s.warmup_enabled,s.warmup_completed,s.stretch_enabled,s.stretch_completed FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id ORDER BY s.started_at DESC,se.sort_order,ss.set_index,ss.side`,
       );
       const escape = (v: any) =>
         '"' + String(v ?? "").replaceAll('"', '""') + '"';
@@ -715,6 +751,8 @@ export class FitLog {
             "侧别",
             "动作备注",
             "下次提醒",
+            "训前热身完成",
+            "训后拉伸完成",
           ],
           ...rows.map((r) => [
             r.started_at,
@@ -729,6 +767,8 @@ export class FitLog {
             r.side === "left" ? "左" : r.side === "right" ? "右" : "双手",
             r.notes,
             r.next_reminder_snapshot,
+            r.warmup_enabled ? (r.warmup_completed ? "是" : "否") : "",
+            r.stretch_enabled ? (r.stretch_completed ? "是" : "否") : "",
           ]),
         ]
           .map((r) => r.map(escape).join(","))
@@ -745,7 +785,7 @@ export class FitLog {
         throw Error("不是有效JSON");
       }
       if (
-        ![1, 2, 3].includes(data.schema_version) ||
+        ![1, 2, 3, 4].includes(data.schema_version) ||
         !Number.isFinite(Date.parse(data.exported_at))
       )
         throw Error("不支持的备份版本或时间");
@@ -765,6 +805,9 @@ export class FitLog {
             for (const [key, value] of Object.entries(v3Defaults[table] ?? {}))
               if (!(key in row)) row[key] = value;
           }
+          if (data.schema_version < 4 && row && typeof row === "object" && !Array.isArray(row))
+            for (const [key, value] of Object.entries(v4Defaults[table] ?? {}))
+              if (!(key in row)) row[key] = value;
           if (
             !row ||
             typeof row !== "object" ||
@@ -785,6 +828,13 @@ export class FitLog {
             !["both", "left", "right"].includes(row.side)
           )
             throw Error("侧别无效");
+          for (const flag of ["warmup_enabled", "warmup_completed", "stretch_enabled", "stretch_completed"])
+            if (row[flag] !== undefined && ![0, 1].includes(row[flag]))
+              throw Error("辅助训练状态无效");
+          for (const field of ["warmup_text", "stretch_text"])
+            if (row[field] !== undefined &&
+              (typeof row[field] !== "string" || row[field].length > 2000))
+              throw Error("辅助训练文字无效");
           for (const k of ["notes", "next_reminder", "next_reminder_snapshot"])
             if (
               row[k] !== undefined &&

@@ -398,3 +398,17 @@ label select {
   margin-top: 3px;
 }
 .row h2 { min-width: 0; overflow-wrap: anywhere; }
+
+/* V1.3.4 optional warmup and stretch modules */
+.aux-panel summary, .aux-editor-content summary {
+  cursor: pointer; font-weight: 650; padding: 6px 0; color: #eef1f6;
+}
+.aux-panel .aux-text {
+  white-space: pre-wrap; overflow-wrap: anywhere; color: #d5ddea;
+  line-height: 1.75; padding: 10px 0;
+}
+.aux-check { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.aux-check input { width: 24px; min-height: 24px; flex: 0 0 24px; }
+.aux-editor-content { padding: 8px 12px 14px; background: #1c2028; border-radius: 12px; margin: 4px 0 10px; }
+.aux-editor-content textarea { margin-top: 10px; min-height: 110px; }
+.aux-hint { margin: 4px 0 0; }

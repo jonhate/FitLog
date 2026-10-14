@@ -12,6 +12,25 @@ import { HistoryCalendar, localDateKey } from "./HistoryCalendar";
 let service: FitLog;
 const day = () => new Date().getDay() || 7;
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+const warmupByDay: Record<number, string> = {
+  1: '快走3分钟\n肩关节绕环10次\n弹力带拉开12次\n轻量俯卧撑8次\n卧推递增热身2–3组（不计入正式组）',
+  2: '快走3分钟\n肩胛控制10次\n弹力带划船12次\n胸椎旋转左右各8次\n首个划船/下拉动作1–2组轻重量热身',
+  3: '',
+  4: '轻松步行3分钟\n前后摆腿左右各10次\n臀桥12次\n徒手深蹲10次\n腿部主项递增热身2–3组',
+  5: '快走3分钟\n肩胛控制10次\n弹力带划船12次\n胸椎旋转左右各8次\n首个划船/下拉动作1–2组轻重量热身',
+  6: '快走3分钟\n肩关节绕环10次\n弹力带拉开12次\n轻量俯卧撑8次\n卧推递增热身2–3组（不计入正式组）',
+  7: '',
+};
+const stretchByDay: Record<number, string> = {
+  1: '门框胸肌拉伸左右各20–30秒\n三头过顶拉伸左右各20–30秒\n肩后侧拉伸左右各20–30秒；按需重复',
+  2: '凳上背阔肌拉伸20–30秒\n肩后侧拉伸左右各20–30秒\n轻柔胸椎旋转；按需重复',
+  3: '',
+  4: '髋屈肌拉伸左右各20–30秒\n股四头肌拉伸左右各20–30秒\n腘绳肌拉伸左右各20–30秒；按需重复',
+  5: '凳上背阔肌拉伸20–30秒\n肩后侧拉伸左右各20–30秒\n轻柔胸椎旋转；按需重复',
+  6: '门框胸肌拉伸左右各20–30秒\n三头过顶拉伸左右各20–30秒\n肩后侧拉伸左右各20–30秒；按需重复',
+  7: '',
+};
+
 function Numeric({
   value,
   onChange,
@@ -338,6 +357,19 @@ function App() {
       setError("保存失败：" + err.message);
     }
   };
+  const toggleAux = (kind: "warmup" | "stretch", completed: boolean) => {
+    const key = `${kind}_completed`;
+    if (historical) {
+      setSession((current: any) => ({ ...current, [key]: completed ? 1 : 0 }));
+      setDirty(true);
+      return;
+    }
+    void action(async () => {
+      await service.setAuxCompleted(session.id, kind, completed ? 1 : 0);
+      await loadSession(session.id);
+      setMessage("已保存");
+    });
+  };
   const mutateSession = async (fn: () => Promise<any>) =>
     action(async () => {
       await fn();
@@ -363,7 +395,7 @@ function App() {
       <header>
         <div>
           <strong>
-            FitLog<span>V1.3.3</span>
+            FitLog<span>V1.3.4</span>
           </strong>
           <small>本地 · 离线 · 属于你</small>
         </div>
@@ -424,6 +456,21 @@ function App() {
             {historical ? "历史编辑，需明确保存" : message || "输入自动保存"}
           </p>
           <Progress session={session} />
+          {!!session.warmup_enabled && (
+            <section className="aux-panel">
+              <details open>
+                <summary>训前热身</summary>
+                <p className="aux-hint">正式训练前完成，动作不计入正式组数</p>
+                <div className="aux-text">{session.warmup_text}</div>
+                <label className="aux-check">
+                  <input type="checkbox" aria-label="已完成热身"
+                    checked={!!session.warmup_completed}
+                    onChange={(e) => toggleAux("warmup", e.target.checked)} />
+                  已完成热身
+                </label>
+              </details>
+            </section>
+          )}
           {session.exercises.map((e: any) => (
             <section key={e.id} className={e.skipped ? "skipped" : ""}>
               <div className="row">
@@ -561,6 +608,21 @@ function App() {
               )}
             </section>
           ))}
+          {!!session.stretch_enabled && (
+            <section className="aux-panel">
+              <details open>
+                <summary>训后拉伸</summary>
+                <p className="aux-hint">放松与活动度练习，不计入力量训练进度</p>
+                <div className="aux-text">{session.stretch_text}</div>
+                <label className="aux-check">
+                  <input type="checkbox" aria-label="已完成拉伸"
+                    checked={!!session.stretch_completed}
+                    onChange={(e) => toggleAux("stretch", e.target.checked)} />
+                  已完成拉伸
+                </label>
+              </details>
+            </section>
+          )}
           {historical ? (
             <section>
               <label>
@@ -682,6 +744,42 @@ function App() {
               setDirty(true);
             }}
           />
+          {([
+            { kind: "warmup", title: "训前热身", list: warmupByDay },
+            { kind: "stretch", title: "训后拉伸", list: stretchByDay },
+          ] as const).map(({ kind, title, list }) => {
+            const enabledKey = `${kind}_enabled`;
+            const textKey = `${kind}_text`;
+            const enabled = !!plan[enabledKey];
+            return (
+              <div key={kind} className="aux-editor">
+                <label className="row rest-switch">
+                  <input role="switch" aria-label={title} type="checkbox"
+                    checked={enabled}
+                    onChange={(event) => {
+                      setPlan({ ...plan,
+                        [enabledKey]: event.target.checked ? 1 : 0,
+                        [textKey]: event.target.checked && !plan[textKey]
+                          ? list[plan.weekday] : plan[textKey],
+                      });
+                      setDirty(true);
+                    }} />
+                  <span>{title}<small>{kind === "warmup" ? "力量训练开始前" : "所有正式训练动作之后"}</small></span>
+                </label>
+                {enabled && <details className="aux-editor-content" open>
+                  <summary>{title}内容（点击展开 / 收起）</summary>
+                  <textarea aria-label={`${title}动作清单`} rows={5}
+                    value={plan[textKey] || ""}
+                    maxLength={2000}
+                    onChange={(event) => {
+                      setPlan({ ...plan, [textKey]: event.target.value });
+                      setDirty(true);
+                    }} />
+                  <small>每行一个动作或提示；训练时只需在末尾勾选一次完成。</small>
+                </details>}
+              </div>
+            );
+          })}
           <label className="row rest-switch">
             <input
               role="switch"
@@ -1073,7 +1171,7 @@ function App() {
               <p>
                 {stats?.sessions} 次训练 · {stats?.sets} 个完成组
               </p>
-              <p>数据库 v3 · 应用 1.0.0（V1.3.3）</p>
+              <p>数据库 v4 · 应用 1.0.0（V1.3.4）</p>
               <p>
                 卸载或清除应用数据会删除数据库。请将JSON备份保存到独立目录。
               </p>
